@@ -1,0 +1,50 @@
+---
+description: How and when to use the insights CLI for knowledge management
+globs:
+alwaysApply: true
+---
+# Insights CLI
+
+A knowledge management system for storing and retrieving concise, reusable insights organized by topic. Insights persist across sessions and conversations.
+
+## Commands
+
+```
+insights add <topic> <name> <overview> <details>    # Store a new insight
+insights search <terms...> [-t topic] [-e exact]     # Search across all insights
+insights get <topic> <name> [-o overview-only]        # Retrieve a specific insight
+insights update <topic> <name> [-o overview] [-d details]  # Update an existing insight
+insights delete <topic> <name> [-f force]             # Remove an insight
+insights list [topic] [-v verbose]                    # List insights, optionally filtered
+insights topics                                       # List all topics
+```
+
+## When to Use Insights
+
+**At the start of work:** Search for relevant insights before diving into code. Insights are consolidated, searchable, and source-agnostic — often a as good a starting point as the repo itself.
+
+**During work:** Make multiple searches as you learn more. Follow leads from one insight to the next.
+
+**When you discover something:** Add insights for problem-solution patterns, configuration that works well, workflow optimizations, integration patterns, and niche discoveries about a codebase.
+
+**When you find stale info:** If an insight contradicts what you observe, stop, verify with available tools, and `insights update` the bad information. If the insight is completely out of date and/or misleading, you can simply delete the insight entirely and create a new one.
+
+**At the end of work:** Summarize what was done with one final insight.
+
+## What Makes a Good Insight
+
+An insight should be:
+- **Reusable** — likely to apply to future situations
+- **Non-obvious** — not basic knowledge found in documentation
+- **Contextual** — specific to this codebase, workflow, or domain
+- **Actionable** — provides clear guidance
+- **Focused** — one specific point or pattern per insight
+
+Keep overviews to one sentence. Keep details to 1-3 paragraphs max.
+
+## Topic Organization
+
+Topics are **specific subjects**, not broad categories. One topic per distinct subject (a repo, a tool, an SME, a technology).
+
+Good: `bentley`, `cursor-mcp`, `react-hooks`, `frontend-ui`
+Bad: `team-knowledge`, `tool-knowledge`, `repository-knowledge`

@@ -1,6 +1,8 @@
 use anyhow::{anyhow, Result};
 use colored::*;
 
+use std::path::PathBuf;
+
 use crate::cli::client::get_client;
 use crate::cli::display::display_search_result;
 use crate::cli::server_manager::ensure_server_running;
@@ -376,4 +378,60 @@ fn display_search_results(
     }
 }
 
-// Display functions moved to cli/display.rs
+const CURSOR_RULE: &str = include_str!("../../.cursor/rules/use-insights.mdc");
+const RULE_FILENAME: &str = "use-insights.mdc";
+
+fn find_git_root() -> Option<PathBuf> {
+    let mut dir = std::env::current_dir().ok()?;
+    loop {
+        if dir.join(".git").exists() {
+            return Some(dir);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
+
+pub fn setup_rules(global: bool) -> Result<()> {
+    let rules_dir = if global {
+        dirs::home_dir()
+            .ok_or_else(|| anyhow::anyhow!("could not determine home directory"))?
+            .join(".cursor")
+            .join("rules")
+    } else {
+        match find_git_root() {
+            Some(root) => root.join(".cursor").join("rules"),
+            None => {
+                let home = dirs::home_dir()
+                    .ok_or_else(|| anyhow::anyhow!("could not determine home directory"))?;
+                println!(
+                    "{}",
+                    "Not inside a git repository — installing globally.".yellow()
+                );
+                home.join(".cursor").join("rules")
+            }
+        }
+    };
+
+    std::fs::create_dir_all(&rules_dir)?;
+
+    let dest = rules_dir.join(RULE_FILENAME);
+    if dest.exists() {
+        println!(
+            "{} already exists at {}",
+            RULE_FILENAME.cyan(),
+            dest.display()
+        );
+        println!("{}", "Overwriting with latest version.".yellow());
+    }
+
+    std::fs::write(&dest, CURSOR_RULE)?;
+    println!(
+        "{} Installed {} to {}",
+        "✓".green(),
+        RULE_FILENAME.cyan(),
+        dest.display()
+    );
+    Ok(())
+}

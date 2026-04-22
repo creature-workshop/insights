@@ -93,6 +93,13 @@ enum Command {
         #[arg(long, default_value = "all")]
         level: String,
     },
+    /// Install the insights Cursor rule into the current project or globally
+    #[command(name = "setup")]
+    Setup {
+        /// Install globally (~/.cursor/rules/) instead of auto-detecting
+        #[arg(short, long)]
+        global: bool,
+    },
 }
 
 async fn handle(command: Command) -> Result<()> {
@@ -129,6 +136,7 @@ async fn handle(command: Command) -> Result<()> {
         Command::Topics => commands::list_topics().await,
         Command::Index { force } => commands::index_insights(force).await,
         Command::Logs { limit, level } => commands::logs(limit, &level).await,
+        Command::Setup { global } => commands::setup_rules(global),
     }
 }
 
