@@ -1,0 +1,18 @@
+# Advisories in transitive dependencies from the optional ml-features tree
+# (lancedb, tokenizers, hf-hub) that have no available fix upstream.
+# Revisit when bumping lancedb beyond 0.22.x.
+
+[advisories]
+ignore = [
+  # rsa: timing sidechannel (no fix available) — lancedb → opendal → reqsign → rsa
+  "RUSTSEC-2023-0071",
+
+  # number_prefix: unmaintained — hf-hub → indicatif → number_prefix
+  "RUSTSEC-2025-0119",
+
+  # paste: unmaintained — tokenizers, lance-bitpacking, datafusion
+  "RUSTSEC-2024-0436",
+
+  # lru: unsound IterMut — lancedb → lance-index → tantivy → lru
+  "RUSTSEC-2026-0002",
+]
