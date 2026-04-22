@@ -51,7 +51,7 @@ jobs:
             rust-
       - run: shell/.ops/init --no-install
       - run: shell/action rust setup
-      - run: shell/.ops/cli/install cargo-binstall cargo-audit
+      - run: cargo install cargo-audit --locked
       - run: cargo audit
 
   test:
