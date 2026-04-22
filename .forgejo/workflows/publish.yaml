@@ -142,5 +142,5 @@ jobs:
       - name: publish-crate
         run: |
           [ -f .version ] || { echo 'No bump performed, skipping publish.'; exit 0; }
-          cargo publish --no-default-features
+          cargo publish
       - run: shell/action linear close-mentioned-issues

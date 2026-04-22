@@ -33,13 +33,13 @@ insights list
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `ml-features` | yes | Neural embeddings, LanceDB, ONNX Runtime |
-| `download-onnx-binaries` | yes | Auto-download ONNX Runtime binaries |
+| `ml-features` | no | Neural embeddings, LanceDB, ONNX Runtime |
+| `download-onnx-binaries` | no | Auto-download ONNX Runtime binaries |
 
-Disable ML features for faster builds:
+Enable ML features for neural embedding search:
 
 ```bash
-cargo build --no-default-features
+cargo build --features ml-features,download-onnx-binaries
 ```
 
 ## License
