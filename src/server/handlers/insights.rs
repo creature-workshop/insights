@@ -413,7 +413,7 @@ async fn process_insights_for_embedding(
 
 /// Log progress periodically during processing
 async fn log_progress_if_needed(context: &RequestContext, index: usize, stats: &ReindexingStats) {
-    if (index + 1) % 10 == 0 || index == stats.total - 1 {
+    if (index + 1).is_multiple_of(10) || index == stats.total - 1 {
         context
             .log_info(
                 &format!(
