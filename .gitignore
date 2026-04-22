@@ -1,0 +1,7 @@
+/target
+
+# Derived from shellops submodule
+shell/ops
+
+# Derived from shellops submodule
+shell/action

@@ -1,0 +1,94 @@
+[package]
+name = "insights"
+version = "0.12.0"
+edition = "2021"
+authors = ["Voxel <travelsizedlions@gmail.com>"]
+license = "MIT"
+repository = "https://creature-workshop.kernelle-soft.com/kernelle-soft/insights"
+description = "Knowledge management and insight storage system"
+readme = "README.md"
+keywords = ["knowledge-management", "cli", "search", "embeddings"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = [
+  "shell/",
+  ".forgejo/",
+  ".envrc",
+  "lefthook.yml",
+  "manifest.json",
+  "ops.lock",
+  "tarpaulin.toml",
+]
+
+[lib]
+name = "insights"
+path = "src/lib.rs"
+
+[[bin]]
+name = "insights"
+path = "src/main.rs"
+
+[[bin]]
+name = "install_insights_cuda_dependencies"
+path = "src/bin/install_insights_cuda_dependencies.rs"
+
+[[bin]]
+name = "insights_server"
+path = "src/bin/insights_server.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive", "env"] }
+dirs = "6.0"
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1.0"
+colored = "3.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+bentley = { version = "0.12", features = ["daemon-logs", "schemars"] }
+
+tokio = { version = "1.47", features = ["full"] }
+uuid = { version = "1.18", features = ["v4", "serde"] }
+
+axum = { version = "0.8", features = ["macros"] }
+schemars = { version = "0.8", features = ["uuid1", "chrono"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+reqwest = { version = "0.12.23", features = ["json", "rustls-tls"] }
+once_cell = "1.17"
+async-trait = "0.1"
+
+lancedb = { version = "0.22.0", default-features = false, optional = true }
+arrow = { version = "55", features = ["json"], optional = true }
+arrow-json = { version = "55", optional = true }
+futures = "0.3"
+
+ort = { version = "2.0.0-rc.10", default-features = false, features = [
+  "fetch-models", "cuda", "coreml", "ndarray", "std"
+], optional = true }
+ndarray = { version = "0.16", optional = true }
+tokenizers = { version = "0.21", default-features = false, features = ["onig"], optional = true }
+hf-hub = { version = "0.4", default-features = false, features = ["tokio"], optional = true }
+safetensors = { version = "0.6", optional = true }
+
+[dev-dependencies]
+assert_cmd = "2.0"
+assert_fs = "1.1"
+predicates = "3.1"
+serial_test = "3.2"
+tempfile = "3.20"
+mockall = "0.13"
+
+[features]
+default = ["ml-features", "download-onnx-binaries"]
+ml-features = [
+  "dep:lancedb", "dep:arrow", "dep:arrow-json",
+  "dep:ort", "dep:ndarray", "dep:tokenizers",
+  "dep:hf-hub", "dep:safetensors"
+]
+download-onnx-binaries = ["ort?/download-binaries"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin_include)'] }

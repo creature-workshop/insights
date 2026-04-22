@@ -1,0 +1,26 @@
+{
+  "name": "insights",
+  "command-name": "insights",
+  "description": "Knowledge management and insight storage system",
+  "org": "kernelle-soft",
+  "linear-team": "OPS",
+  "repo": "insights",
+  "latest": "0.12.0",
+  "stable": "0.12.0",
+  "releases": 0,
+  "naming": {
+    "major": "",
+    "minor": "",
+    "patch": ""
+  },
+  "labels": {
+    "area": {
+      "cli": "CLI commands, argument parsing, display formatting, and server management",
+      "server": "REST API routing, middleware, startup, and request handling",
+      "models": "Insight data model and filesystem persistence",
+      "search": "Text search and similarity scoring",
+      "embeddings": "Neural embedding generation, model loading, and ONNX inference",
+      "lancedb": "Vector database storage, table management, and vector search"
+    }
+  }
+}
