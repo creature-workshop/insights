@@ -53,9 +53,15 @@ enum Command {
     List {
         /// Optional topic to filter by
         topic: Option<String>,
-        /// Show overview content for each insight
+        /// Show overview content and usage stats for each insight
         #[arg(short, long)]
         verbose: bool,
+        /// Show only pinned insights
+        #[arg(long)]
+        pinned: bool,
+        /// Sort order for listing
+        #[arg(long, value_enum, default_value = "relevance")]
+        sort: insights::server::types::SearchSort,
     },
     /// Update an existing insight
     Update {
@@ -75,6 +81,16 @@ enum Command {
         /// Skip confirmation prompt
         #[arg(short, long)]
         force: bool,
+    },
+    /// Pin an insight to protect it from pruning
+    Pin {
+        #[command(flatten)]
+        id: InsightId,
+    },
+    /// Unpin an insight to allow pruning
+    Unpin {
+        #[command(flatten)]
+        id: InsightId,
     },
     /// List all available topics
     Topics,
@@ -111,9 +127,12 @@ async fn handle(command: Command) -> Result<()> {
         } => commands::add_insight(&id.topic, &id.name, &overview, &details).await,
         Command::Search { options, terms } => commands::search_insights(&terms, options).await,
         Command::Get { id, overview } => commands::get_insight(&id.topic, &id.name, overview).await,
-        Command::List { topic, verbose } => {
-            commands::list_insights(topic.as_deref(), verbose).await
-        }
+        Command::List {
+            topic,
+            verbose,
+            pinned,
+            sort,
+        } => commands::list_insights(topic.as_deref(), verbose, pinned, sort).await,
         Command::Update {
             id,
             overview,
@@ -123,6 +142,8 @@ async fn handle(command: Command) -> Result<()> {
                 .await
         }
         Command::Delete { id, force } => commands::delete_insight(&id.topic, &id.name, force).await,
+        Command::Pin { id } => commands::pin_insight(&id.topic, &id.name).await,
+        Command::Unpin { id } => commands::unpin_insight(&id.topic, &id.name).await,
         Command::Topics => commands::list_topics().await,
         Command::Index { force } => commands::index_insights(force).await,
         Command::Logs { limit, level } => commands::logs(limit, &level).await,

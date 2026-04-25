@@ -162,6 +162,16 @@ pub struct RemoveInsightRequest {
     pub name: String,
 }
 
+/// Request for /insights/pin and /insights/unpin endpoints
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct PinInsightRequest {
+    /// Topic category
+    pub topic: String,
+
+    /// Insight name
+    pub name: String,
+}
+
 /// Request for /insights/get endpoint
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct GetInsightRequest {
@@ -197,6 +207,22 @@ pub struct InsightData {
 
     /// Detailed content
     pub details: String,
+
+    /// Whether this insight is pinned (protected from pruning)
+    #[serde(default)]
+    pub pinned: bool,
+
+    /// Number of explicit retrievals
+    #[serde(default)]
+    pub retrieval_count: u32,
+
+    /// Number of times appeared in search results
+    #[serde(default)]
+    pub search_hit_count: u32,
+
+    /// Last time this insight was accessed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_accessed: Option<DateTime<Utc>>,
 
     /// Embedding version (if computed)
     pub embedding_version: Option<String>,
@@ -258,6 +284,8 @@ pub enum SearchSort {
     Updated,
     /// Sort by creation timestamp, newest first
     Created,
+    /// Sort by least accessed (lowest combined access count first) for pruning candidates
+    LeastAccessed,
 }
 
 /// Search request data
@@ -351,6 +379,22 @@ pub struct InsightSummary {
 
     /// Brief overview
     pub overview: String,
+
+    /// Whether this insight is pinned (protected from pruning)
+    #[serde(default)]
+    pub pinned: bool,
+
+    /// Number of explicit retrievals
+    #[serde(default)]
+    pub retrieval_count: u32,
+
+    /// Number of times appeared in search results
+    #[serde(default)]
+    pub search_hit_count: u32,
+
+    /// Last time this insight was accessed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_accessed: Option<DateTime<Utc>>,
 
     /// Creation timestamp
     pub created_at: DateTime<Utc>,
