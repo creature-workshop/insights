@@ -59,7 +59,7 @@ pub async fn list_insights(
         .insights
         .into_iter()
         .filter(|insight| {
-            let topic_match = filter.map_or(true, |t| insight.topic == t);
+            let topic_match = filter.is_none_or(|t| insight.topic == t);
             let pin_match = !pinned_only || insight.pinned;
             topic_match && pin_match
         })

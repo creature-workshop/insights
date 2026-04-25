@@ -143,8 +143,7 @@ pub async fn pin_insight(
     let mut insight_data = insight::load(&request.topic, &request.name)
         .map_err(|e| create_insight_not_found_error(e, transaction_id))?;
 
-    insight::pin(&mut insight_data)
-        .map_err(|e| create_pin_error(e, transaction_id))?;
+    insight::pin(&mut insight_data).map_err(|e| create_pin_error(e, transaction_id))?;
 
     context
         .log_success(
@@ -167,8 +166,7 @@ pub async fn unpin_insight(
     let mut insight_data = insight::load(&request.topic, &request.name)
         .map_err(|e| create_insight_not_found_error(e, transaction_id))?;
 
-    insight::unpin(&mut insight_data)
-        .map_err(|e| create_pin_error(e, transaction_id))?;
+    insight::unpin(&mut insight_data).map_err(|e| create_pin_error(e, transaction_id))?;
 
     context
         .log_success(
@@ -642,8 +640,7 @@ async fn score_single_result(
                 result.topic, result.name, result.overview, result.details
             );
             let base_score = compute_relevance_score(query_text, &doc_text, &result).await;
-            let score =
-                base_score * crate::server::services::search::usage_boost(&full_insight);
+            let score = base_score * crate::server::services::search::usage_boost(&full_insight);
 
             Some(SearchResultData {
                 topic: result.topic,
@@ -924,7 +921,10 @@ pub async fn get_insight(
             if let Err(e) = insight::record_access(&mut insight_data, AccessType::Retrieval) {
                 context
                     .log_warn(
-                        &format!("Failed to record access for {}/{}: {e}", request.topic, request.name),
+                        &format!(
+                            "Failed to record access for {}/{}: {e}",
+                            request.topic, request.name
+                        ),
                         "insights-api",
                     )
                     .await;
