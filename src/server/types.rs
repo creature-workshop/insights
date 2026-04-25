@@ -1,6 +1,7 @@
 //! REST API types with schemars annotations for OpenAPI generation
 
 use chrono::{DateTime, Utc};
+use clap::ValueEnum;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -244,6 +245,21 @@ pub struct ListInsightsResponse {
 // Search Types
 // ============
 
+/// Search result ordering
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ValueEnum,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum SearchSort {
+    /// Sort by search relevance score
+    #[default]
+    Relevance,
+    /// Sort by last updated timestamp, newest first
+    Updated,
+    /// Sort by creation timestamp, newest first
+    Created,
+}
+
 /// Search request data
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SearchRequest {
@@ -268,6 +284,18 @@ pub struct SearchRequest {
     /// Use semantic search (term matching + jaccard similarity, no embedding)
     #[serde(default)]
     pub semantic: bool,
+
+    /// Result ordering
+    #[serde(default)]
+    pub sort: SearchSort,
+
+    /// Include insights updated on or after this absolute or relative date
+    #[serde(default)]
+    pub since: Option<String>,
+
+    /// Include insights updated on or before this absolute or relative date
+    #[serde(default)]
+    pub until: Option<String>,
 }
 
 /// Search result data
@@ -287,6 +315,12 @@ pub struct SearchResultData {
 
     /// Search score
     pub score: f32,
+
+    /// Creation timestamp
+    pub created_at: DateTime<Utc>,
+
+    /// Last updated timestamp
+    pub updated_at: DateTime<Utc>,
 }
 
 /// Search response data
@@ -455,12 +489,16 @@ mod tests {
             overview_only: false,
             exact: false,
             semantic: false,
+            sort: SearchSort::Relevance,
+            since: None,
+            until: None,
         };
 
         // These should all be false by default due to #[serde(default)]
         assert!(!request.case_sensitive);
         assert!(!request.overview_only);
         assert!(!request.exact);
+        assert_eq!(request.sort, SearchSort::Relevance);
     }
 
     #[test]

@@ -109,17 +109,7 @@ async fn handle(command: Command) -> Result<()> {
             overview,
             details,
         } => commands::add_insight(&id.topic, &id.name, &overview, &details).await,
-        Command::Search { options, terms } => {
-            commands::search_insights(
-                &terms,
-                options.topic.clone(),
-                options.case_sensitive,
-                options.overview_only,
-                options.exact,
-                options.semantic,
-            )
-            .await
-        }
+        Command::Search { options, terms } => commands::search_insights(&terms, options).await,
         Command::Get { id, overview } => commands::get_insight(&id.topic, &id.name, overview).await,
         Command::List { topic, verbose } => {
             commands::list_insights(topic.as_deref(), verbose).await

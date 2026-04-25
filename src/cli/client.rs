@@ -13,7 +13,8 @@ use tokio::time::timeout;
 
 use crate::server::types::{
     AddInsightRequest, BaseResponse, GetInsightRequest, GetInsightResponse, InsightFilter,
-    ListInsightsResponse, ListTopicsResponse, RemoveInsightRequest, UpdateInsightRequest,
+    ListInsightsResponse, ListTopicsResponse, RemoveInsightRequest, SearchRequest, SearchResponse,
+    UpdateInsightRequest,
 };
 
 /// HTTP method types for REST API calls
@@ -221,25 +222,7 @@ impl InsightsClient {
     }
 
     /// Search insights
-    pub async fn search_insights(
-        &self,
-        terms: Vec<String>,
-        topic: Option<String>,
-        case_sensitive: bool,
-        overview_only: bool,
-        exact: bool,
-        semantic: bool,
-    ) -> Result<crate::server::types::SearchResponse> {
-        use crate::server::types::SearchRequest;
-
-        let request = SearchRequest {
-            terms,
-            topic,
-            case_sensitive,
-            overview_only,
-            exact,
-            semantic,
-        };
+    pub async fn search_insights(&self, request: SearchRequest) -> Result<SearchResponse> {
         self.post_json("/insights/search", &request).await
     }
 

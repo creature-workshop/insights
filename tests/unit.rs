@@ -3,6 +3,7 @@ mod insight_tests {
     use anyhow::Result;
     use insights::server::models::insight::{self, Insight};
     use insights::server::services::search;
+    use insights::server::types::SearchSort;
     use serial_test::serial;
     use std::env;
     use tempfile::TempDir;
@@ -12,6 +13,12 @@ mod insight_tests {
         let _unique_var = format!("INSIGHTS_ROOT_{}", test_name.to_uppercase());
         env::set_var("INSIGHTS_ROOT", temp_dir.path());
         temp_dir
+    }
+
+    fn timestamp(value: &str) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::parse_from_rfc3339(value)
+            .unwrap()
+            .with_timezone(&chrono::Utc)
     }
 
     #[test]
@@ -223,6 +230,47 @@ mod insight_tests {
 
     #[test]
     #[serial]
+    fn test_parse_insight_content_trailing_metadata() -> Result<()> {
+        let content = r#"---
+topic: temporal_test
+name: footer_metadata
+overview: Simple overview
+---
+
+# Details
+Details stay as the insight body.
+
+---
+metadata:
+  created_at: 2024-01-15T10:30:00Z
+  last_updated: 2024-01-20T14:45:00Z
+  update_count: 5
+"#;
+
+        let (metadata, details) = insight::parse_insight_with_metadata(content)?;
+
+        assert_eq!(metadata.topic, "temporal_test");
+        assert_eq!(metadata.name, "footer_metadata");
+        assert_eq!(details, "Details stay as the insight body.");
+        assert_eq!(
+            metadata.created_at,
+            chrono::DateTime::parse_from_rfc3339("2024-01-15T10:30:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc)
+        );
+        assert_eq!(
+            metadata.last_updated,
+            chrono::DateTime::parse_from_rfc3339("2024-01-20T14:45:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc)
+        );
+        assert_eq!(metadata.update_count, 5);
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
     fn test_parse_insight_content_legacy_no_frontmatter() {
         let content = "This is not valid format";
 
@@ -404,6 +452,7 @@ mod insight_tests {
             overview_only: false,
             exact: true, // Use exact search which doesn't require neural features
             semantic: false,
+            ..search::SearchOptions::default()
         };
 
         let results = search::search(&["rust".to_string()], &search_options)?;
@@ -416,6 +465,181 @@ mod insight_tests {
         // Test that search results can be displayed (this tests our highlighting integration)
         // The highlighting happens in the display function, so we mainly test that it doesn't crash
         search::display_results(&results, &["rust".to_string()], false);
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_search_default_sort_preserves_relevance_ordering() -> Result<()> {
+        let _temp = setup_temp_insights_root("search_relevance_sort");
+
+        let mut older_high_relevance = Insight::new(
+            "recency".to_string(),
+            "older_high_relevance".to_string(),
+            "needle needle".to_string(),
+            "needle".to_string(),
+        );
+        older_high_relevance.created_at = timestamp("2024-01-01T00:00:00Z");
+        older_high_relevance.last_updated = timestamp("2024-01-02T00:00:00Z");
+
+        let mut newer_low_relevance = Insight::new(
+            "recency".to_string(),
+            "newer_low_relevance".to_string(),
+            "needle".to_string(),
+            "no extra matches".to_string(),
+        );
+        newer_low_relevance.created_at = timestamp("2024-02-01T00:00:00Z");
+        newer_low_relevance.last_updated = timestamp("2024-02-02T00:00:00Z");
+
+        insight::save(&older_high_relevance)?;
+        insight::save(&newer_low_relevance)?;
+
+        let results = search::search(
+            &["needle".to_string()],
+            &search::SearchOptions {
+                exact: true,
+                sort: SearchSort::Relevance,
+                ..search::SearchOptions::default()
+            },
+        )?;
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].name, "older_high_relevance");
+        assert_eq!(results[1].name, "newer_low_relevance");
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_search_can_sort_by_updated_timestamp() -> Result<()> {
+        let _temp = setup_temp_insights_root("search_updated_sort");
+
+        let mut older = Insight::new(
+            "recency".to_string(),
+            "older".to_string(),
+            "needle needle".to_string(),
+            "needle".to_string(),
+        );
+        older.created_at = timestamp("2024-01-01T00:00:00Z");
+        older.last_updated = timestamp("2024-01-02T00:00:00Z");
+
+        let mut newer = Insight::new(
+            "recency".to_string(),
+            "newer".to_string(),
+            "needle".to_string(),
+            "no extra matches".to_string(),
+        );
+        newer.created_at = timestamp("2024-02-01T00:00:00Z");
+        newer.last_updated = timestamp("2024-02-02T00:00:00Z");
+
+        insight::save(&older)?;
+        insight::save(&newer)?;
+
+        let results = search::search(
+            &["needle".to_string()],
+            &search::SearchOptions {
+                exact: true,
+                sort: SearchSort::Updated,
+                ..search::SearchOptions::default()
+            },
+        )?;
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].name, "newer");
+        assert_eq!(results[1].name, "older");
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_search_can_sort_by_created_timestamp() -> Result<()> {
+        let _temp = setup_temp_insights_root("search_created_sort");
+
+        let mut older_created = Insight::new(
+            "recency".to_string(),
+            "older_created".to_string(),
+            "needle".to_string(),
+            "updated later".to_string(),
+        );
+        older_created.created_at = timestamp("2024-01-01T00:00:00Z");
+        older_created.last_updated = timestamp("2024-03-01T00:00:00Z");
+
+        let mut newer_created = Insight::new(
+            "recency".to_string(),
+            "newer_created".to_string(),
+            "needle".to_string(),
+            "updated earlier".to_string(),
+        );
+        newer_created.created_at = timestamp("2024-02-01T00:00:00Z");
+        newer_created.last_updated = timestamp("2024-02-02T00:00:00Z");
+
+        insight::save(&older_created)?;
+        insight::save(&newer_created)?;
+
+        let results = search::search(
+            &["needle".to_string()],
+            &search::SearchOptions {
+                exact: true,
+                sort: SearchSort::Created,
+                ..search::SearchOptions::default()
+            },
+        )?;
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].name, "newer_created");
+        assert_eq!(results[1].name, "older_created");
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_search_filters_by_updated_date_range() -> Result<()> {
+        let _temp = setup_temp_insights_root("search_date_filter");
+
+        let mut before_range = Insight::new(
+            "recency".to_string(),
+            "before_range".to_string(),
+            "needle".to_string(),
+            "too old".to_string(),
+        );
+        before_range.last_updated = timestamp("2024-01-01T00:00:00Z");
+
+        let mut in_range = Insight::new(
+            "recency".to_string(),
+            "in_range".to_string(),
+            "needle".to_string(),
+            "just right".to_string(),
+        );
+        in_range.last_updated = timestamp("2024-01-15T00:00:00Z");
+
+        let mut after_range = Insight::new(
+            "recency".to_string(),
+            "after_range".to_string(),
+            "needle".to_string(),
+            "too new".to_string(),
+        );
+        after_range.last_updated = timestamp("2024-02-01T00:00:00Z");
+
+        insight::save(&before_range)?;
+        insight::save(&in_range)?;
+        insight::save(&after_range)?;
+
+        let results = search::search(
+            &["needle".to_string()],
+            &search::SearchOptions {
+                exact: true,
+                since: Some(timestamp("2024-01-10T00:00:00Z")),
+                until: Some(timestamp("2024-01-20T00:00:00Z")),
+                ..search::SearchOptions::default()
+            },
+        )?;
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "in_range");
 
         Ok(())
     }
@@ -528,9 +752,22 @@ mod insight_tests {
         let file_content = std::fs::read_to_string(&file_path)?;
 
         // Verify temporal metadata is in the file
-        assert!(file_content.contains("created_at: 2024-01-15T10:30:00Z"));
-        assert!(file_content.contains("last_updated: 2024-01-20T14:45:00Z"));
-        assert!(file_content.contains("update_count: 5"));
+        let frontmatter = file_content
+            .strip_prefix("---\n")
+            .and_then(|content| {
+                content
+                    .split_once("\n---\n")
+                    .map(|(frontmatter, _)| frontmatter)
+            })
+            .expect("serialized insight should start with frontmatter");
+        assert!(!frontmatter.contains("created_at:"));
+        assert!(!frontmatter.contains("last_updated:"));
+        assert!(!frontmatter.contains("update_count:"));
+
+        assert!(file_content.contains("\n---\nmetadata:\n"));
+        assert!(file_content.contains("  created_at: 2024-01-15T10:30:00Z"));
+        assert!(file_content.contains("  last_updated: 2024-01-20T14:45:00Z"));
+        assert!(file_content.contains("  update_count: 5"));
 
         // Load the insight back from file
         let loaded_insight = insight::load("serialization_test", "temporal_metadata")?;
@@ -539,6 +776,47 @@ mod insight_tests {
         assert_eq!(loaded_insight.created_at, insight.created_at);
         assert_eq!(loaded_insight.last_updated, insight.last_updated);
         assert_eq!(loaded_insight.update_count, insight.update_count);
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_backwards_compatibility_frontmatter_temporal_fields() -> Result<()> {
+        let content = r#"---
+topic: legacy_test
+name: old_temporal_insight
+overview: This stores temporal metadata in frontmatter
+created_at: 2024-01-15T10:30:00Z
+last_updated: 2024-01-20T14:45:00Z
+update_count: 3
+---
+
+# Details
+This insight uses the old temporal metadata location.
+"#;
+
+        let (metadata, details) = insight::parse_insight_with_metadata(content)?;
+
+        assert_eq!(metadata.topic, "legacy_test");
+        assert_eq!(metadata.name, "old_temporal_insight");
+        assert_eq!(
+            metadata.created_at,
+            chrono::DateTime::parse_from_rfc3339("2024-01-15T10:30:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc)
+        );
+        assert_eq!(
+            metadata.last_updated,
+            chrono::DateTime::parse_from_rfc3339("2024-01-20T14:45:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc)
+        );
+        assert_eq!(metadata.update_count, 3);
+        assert_eq!(
+            details,
+            "This insight uses the old temporal metadata location."
+        );
 
         Ok(())
     }

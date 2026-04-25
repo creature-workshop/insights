@@ -24,7 +24,11 @@ const FRONTMATTER_END: &str = "\n---\n";
 const FRONTMATTER_START_LEN: usize = 4; // Length of "---\n"
 const FRONTMATTER_END_LEN: usize = 5; // Length of "\n---\n"
 
-/// YAML frontmatter structure for insight files
+/// YAML frontmatter structure for insight files.
+///
+/// Temporal fields are retained here so older files that stored timestamps in
+/// frontmatter continue to load. New files write timestamps in a trailing
+/// metadata block after the details body.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InsightMetaData {
     #[serde(default)]
@@ -33,7 +37,6 @@ pub struct InsightMetaData {
     pub name: String,
     pub overview: String,
 
-    // Temporal metadata - always included in files
     #[serde(default = "default_created_at")]
     pub created_at: DateTime<Utc>,
     #[serde(default = "default_last_updated")]
@@ -50,6 +53,25 @@ pub struct InsightMetaData {
     pub embedding_text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub embedding_computed: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct InsightFileFrontMatter {
+    topic: String,
+    name: String,
+    overview: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct InsightTemporalMetadata {
+    created_at: DateTime<Utc>,
+    last_updated: DateTime<Utc>,
+    update_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct InsightFileFooter {
+    metadata: InsightTemporalMetadata,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -118,24 +140,25 @@ pub fn save_existing(insight: &Insight) -> Result<()> {
 fn write_to_file(insight: &Insight, file_path: &PathBuf) -> Result<()> {
     ensure_parent_dir_exists(file_path)?;
 
-    let frontmatter = InsightMetaData {
+    let frontmatter = InsightFileFrontMatter {
         topic: insight.topic.clone(),
         name: insight.name.clone(),
         overview: insight.overview.clone(),
-        // Include temporal metadata in files - useful for filtering and UX
-        created_at: insight.created_at,
-        last_updated: insight.last_updated,
-        update_count: insight.update_count,
-        // Don't serialize embedding data to files - keep files human-readable
-        // Embeddings are stored in LanceDB for search operations
-        embedding_version: None,
-        embedding: None,
-        embedding_text: None,
-        embedding_computed: None,
+    };
+    let temporal_metadata = InsightFileFooter {
+        metadata: InsightTemporalMetadata {
+            created_at: insight.created_at,
+            last_updated: insight.last_updated,
+            update_count: insight.update_count,
+        },
     };
 
     let yaml_content = serde_yaml::to_string(&frontmatter)?;
-    let content = format!("---\n{}---\n\n# Details\n{}", yaml_content, insight.details);
+    let metadata_content = serde_yaml::to_string(&temporal_metadata)?;
+    let content = format!(
+        "---\n{}---\n\n# Details\n{}\n\n---\n{}",
+        yaml_content, insight.details, metadata_content
+    );
     fs::write(file_path, content)?;
 
     Ok(())
@@ -295,9 +318,28 @@ fn split_frontmatter_content(content: &str) -> Result<(&str, &str)> {
 }
 
 fn parse_yaml_format(frontmatter_section: &str, body: &str) -> Result<(InsightMetaData, String)> {
-    let frontmatter = serde_yaml::from_str::<InsightMetaData>(frontmatter_section)?;
-    let details = clean_body_content(body);
+    let mut frontmatter = serde_yaml::from_str::<InsightMetaData>(frontmatter_section)?;
+    let (body_without_metadata, temporal_metadata) = split_trailing_metadata(body);
+    if let Some(metadata) = temporal_metadata {
+        frontmatter.created_at = metadata.created_at;
+        frontmatter.last_updated = metadata.last_updated;
+        frontmatter.update_count = metadata.update_count;
+    }
+
+    let details = clean_body_content(body_without_metadata);
     Ok((frontmatter, details))
+}
+
+fn split_trailing_metadata(body: &str) -> (&str, Option<InsightTemporalMetadata>) {
+    let trimmed_body = body.trim_end();
+
+    if let Some((details, metadata_section)) = trimmed_body.rsplit_once("\n---\n") {
+        if let Ok(footer) = serde_yaml::from_str::<InsightFileFooter>(metadata_section) {
+            return (details, Some(footer.metadata));
+        }
+    }
+
+    (body, None)
 }
 
 fn parse_legacy_format_no_frontmatter(content: &str) -> (InsightMetaData, String) {

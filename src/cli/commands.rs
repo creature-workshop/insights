@@ -6,6 +6,8 @@ use std::path::PathBuf;
 use crate::cli::client::get_client;
 use crate::cli::display::display_search_result;
 use crate::cli::server_manager::ensure_server_running;
+use crate::server::services::search::SearchCommandOptions;
+use crate::server::types::SearchRequest;
 // CLI is now a pure thin client - no business logic imports needed
 
 /// Add a new insight to the knowledge base (production version)
@@ -329,27 +331,23 @@ fn format_duration(duration: f64) -> colored::ColoredString {
 }
 
 /// Search through all insights for matching content
-pub async fn search_insights(
-    terms: &[String],
-    topic: Option<String>,
-    case_sensitive: bool,
-    overview_only: bool,
-    exact: bool,
-    semantic: bool,
-) -> Result<()> {
+pub async fn search_insights(terms: &[String], options: SearchCommandOptions) -> Result<()> {
     ensure_server_running().await?;
 
     let client = get_client();
-    let response = client
-        .search_insights(
-            terms.to_vec(),
-            topic,
-            case_sensitive,
-            overview_only,
-            exact,
-            semantic,
-        )
-        .await?;
+    let overview_only = options.overview_only;
+    let request = SearchRequest {
+        terms: terms.to_vec(),
+        topic: options.topic,
+        case_sensitive: options.case_sensitive,
+        overview_only,
+        exact: options.exact,
+        semantic: options.semantic,
+        sort: options.sort,
+        since: options.since,
+        until: options.until,
+    };
+    let response = client.search_insights(request).await?;
 
     display_search_results(&response.results, terms, overview_only);
 

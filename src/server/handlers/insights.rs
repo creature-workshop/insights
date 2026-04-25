@@ -497,12 +497,14 @@ async fn generate_and_store_embedding(
 async fn perform_vector_search(
     context: &RequestContext,
     request: &SearchRequest,
+    search_options: &crate::server::services::search::SearchOptions,
 ) -> Result<Vec<SearchResultData>> {
     let query_text = request.terms.join(" ");
 
     let query_embedding = embed_query(&query_text).await?;
     let similar_results = initial_search(context, &query_embedding).await?;
-    let reranked_results = rerank_results(context, &query_text, similar_results).await;
+    let reranked_results =
+        rerank_results(context, &query_text, similar_results, search_options).await;
     let final_results = limit_results(reranked_results);
 
     Ok(final_results)
@@ -542,11 +544,14 @@ async fn rerank_results(
     context: &RequestContext,
     query_text: &str,
     similar_results: Vec<crate::server::services::vector_database::VectorSearchResult>,
+    search_options: &crate::server::services::search::SearchOptions,
 ) -> Vec<SearchResultData> {
     let mut reranked_results = Vec::new();
 
     for result in similar_results {
-        if let Some(search_result) = score_single_result(context, query_text, result).await {
+        if let Some(search_result) =
+            score_single_result(context, query_text, result, search_options).await
+        {
             reranked_results.push(search_result);
         }
     }
@@ -560,9 +565,14 @@ async fn score_single_result(
     context: &RequestContext,
     query_text: &str,
     result: VectorSearchResult,
+    search_options: &crate::server::services::search::SearchOptions,
 ) -> Option<SearchResultData> {
     match insight::load(&result.topic, &result.name) {
-        Ok(_full_insight) => {
+        Ok(full_insight) => {
+            if !crate::server::services::search::matches_date_range(&full_insight, search_options) {
+                return None;
+            }
+
             let doc_text = format!(
                 "{} {} {} {}",
                 result.topic, result.name, result.overview, result.details
@@ -575,6 +585,8 @@ async fn score_single_result(
                 overview: result.overview,
                 details: result.details,
                 score,
+                created_at: full_insight.created_at,
+                updated_at: full_insight.last_updated,
             })
         }
         Err(e) => {
@@ -634,6 +646,7 @@ fn limit_results(mut reranked_results: Vec<SearchResultData>) -> Vec<SearchResul
 async fn perform_vector_search(
     _context: &RequestContext,
     _request: &SearchRequest,
+    _search_options: &crate::server::services::search::SearchOptions,
 ) -> Result<Vec<SearchResultData>> {
     // No-op: ML features not available, return empty results
     Ok(vec![])
@@ -896,12 +909,19 @@ pub async fn search_insights(
     let transaction_id = Uuid::new_v4();
 
     log_search_start(&context, &request).await;
-    let search_options = build_search_options(&request);
+    let search_options = build_search_options(&request).map_err(|e| {
+        let error = ApiError::new("invalid_search_options", &e.to_string());
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            ResponseJson(BaseResponse::<()>::error(vec![error], transaction_id)),
+        )
+    })?;
 
     let mut all_results =
         perform_term_search(&context, &request, &search_options, transaction_id).await?;
 
-    let should_finalize = add_embedding_search_results(&context, &request, &mut all_results).await;
+    let should_finalize =
+        add_embedding_search_results(&context, &request, &search_options, &mut all_results).await;
 
     if should_finalize {
         Ok(ResponseJson(
@@ -909,6 +929,7 @@ pub async fn search_insights(
         ))
     } else {
         // No embeddings available - return results as-is
+        sort_and_deduplicate_results(&mut all_results, request.sort);
         let response_data = SearchResponse {
             count: all_results.len(),
             results: all_results,
@@ -934,14 +955,10 @@ async fn log_search_start(context: &RequestContext, request: &SearchRequest) {
 }
 
 /// Build search options from the request
-fn build_search_options(request: &SearchRequest) -> crate::server::services::search::SearchOptions {
-    crate::server::services::search::SearchOptions {
-        topic: request.topic.clone(),
-        case_sensitive: request.case_sensitive,
-        overview_only: request.overview_only,
-        exact: request.exact,
-        semantic: request.semantic,
-    }
+fn build_search_options(
+    request: &SearchRequest,
+) -> Result<crate::server::services::search::SearchOptions> {
+    crate::server::services::search::SearchOptions::from_request(request)
 }
 
 /// Perform term-based search and return results
@@ -993,6 +1010,8 @@ fn convert_search_results_to_api_format(
             overview: result.overview,
             details: result.details,
             score: result.score,
+            created_at: result.created_at,
+            updated_at: result.updated_at,
         })
         .collect()
 }
@@ -1001,6 +1020,7 @@ fn convert_search_results_to_api_format(
 async fn add_embedding_search_results(
     context: &RequestContext,
     request: &SearchRequest,
+    search_options: &crate::server::services::search::SearchOptions,
     all_results: &mut Vec<SearchResultData>,
 ) -> bool {
     if should_skip_embedding_search(request) {
@@ -1009,7 +1029,7 @@ async fn add_embedding_search_results(
 
     match check_embeddings_availability(context, request).await {
         EmbeddingAvailability::Available => {
-            execute_embedding_search(context, request, all_results).await;
+            execute_embedding_search(context, request, search_options, all_results).await;
             true
         }
         EmbeddingAvailability::Unavailable => false,
@@ -1026,9 +1046,10 @@ fn should_skip_embedding_search(request: &SearchRequest) -> bool {
 async fn execute_embedding_search(
     context: &RequestContext,
     request: &SearchRequest,
+    search_options: &crate::server::services::search::SearchOptions,
     all_results: &mut Vec<SearchResultData>,
 ) {
-    match perform_vector_search(context, request).await {
+    match perform_vector_search(context, request, search_options).await {
         Ok(embedding_results) => {
             log_embedding_search_success(context, &embedding_results, &request.terms).await;
             all_results.extend(embedding_results);
@@ -1143,21 +1164,7 @@ async fn finalize_search_results(
     mut all_results: Vec<SearchResultData>,
     transaction_id: Uuid,
 ) -> BaseResponse<SearchResponse> {
-    // Sort and deduplicate results
-    all_results.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.topic.cmp(&b.topic).then_with(|| a.name.cmp(&b.name)))
-    });
-
-    // Deduplicate by keeping only the first occurrence of each (topic, name) pair
-    // Since we sorted by score descending, the first occurrence will be the highest scoring
-    let mut seen = std::collections::HashSet::new();
-    all_results.retain(|result| {
-        let key = (result.topic.clone(), result.name.clone());
-        seen.insert(key)
-    });
+    sort_and_deduplicate_results(&mut all_results, request.sort);
 
     context
         .log_success(
@@ -1175,6 +1182,49 @@ async fn finalize_search_results(
         results: all_results,
     };
     BaseResponse::success(response_data, transaction_id)
+}
+
+fn sort_and_deduplicate_results(
+    all_results: &mut Vec<SearchResultData>,
+    sort: crate::server::types::SearchSort,
+) {
+    sort_results_by_relevance(all_results);
+
+    let mut seen = std::collections::HashSet::new();
+    all_results.retain(|result| {
+        let key = (result.topic.clone(), result.name.clone());
+        seen.insert(key)
+    });
+
+    sort_results_by_requested_order(all_results, sort);
+}
+
+fn sort_results_by_relevance(results: &mut [SearchResultData]) {
+    results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.topic.cmp(&b.topic).then_with(|| a.name.cmp(&b.name)))
+    });
+}
+
+fn sort_results_by_requested_order(
+    results: &mut [SearchResultData],
+    sort: crate::server::types::SearchSort,
+) {
+    match sort {
+        crate::server::types::SearchSort::Relevance => sort_results_by_relevance(results),
+        crate::server::types::SearchSort::Updated => results.sort_by(|a, b| {
+            b.updated_at
+                .cmp(&a.updated_at)
+                .then_with(|| a.topic.cmp(&b.topic).then_with(|| a.name.cmp(&b.name)))
+        }),
+        crate::server::types::SearchSort::Created => results.sort_by(|a, b| {
+            b.created_at
+                .cmp(&a.created_at)
+                .then_with(|| a.topic.cmp(&b.topic).then_with(|| a.name.cmp(&b.name)))
+        }),
+    }
 }
 
 /// Create a standardized error response for search failures

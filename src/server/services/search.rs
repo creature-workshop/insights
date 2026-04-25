@@ -1,11 +1,16 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
+use chrono::{DateTime, Duration, Months, NaiveDate, TimeZone, Utc};
 use clap::Args;
 use colored::*;
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::server::{models::insight, services::similarity};
+use crate::server::{
+    models::insight,
+    services::similarity,
+    types::{SearchRequest, SearchSort},
+};
 
 // Semantic similarity threshold for meaningful results
 const SEMANTIC_SIMILARITY_THRESHOLD: f32 = 0.2;
@@ -20,6 +25,8 @@ pub struct SearchResult {
     pub overview: String,
     pub details: String,
     pub score: f32, // number of matching terms
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 /// Search configuration options
@@ -40,26 +47,204 @@ pub struct SearchCommandOptions {
     /// Use semantic search (term matching + jaccard similarity, no embedding)
     #[arg(short, long)]
     pub semantic: bool,
+    /// Sort results by relevance, updated timestamp, or creation timestamp
+    #[arg(long, value_enum, default_value = "relevance")]
+    pub sort: SearchSort,
+    /// Include insights updated on or after a date (YYYY-MM-DD, RFC3339, or relative like 7d)
+    #[arg(long)]
+    pub since: Option<String>,
+    /// Include insights updated on or before a date (YYYY-MM-DD, RFC3339, or relative like 7d)
+    #[arg(long)]
+    pub until: Option<String>,
 }
 
+#[derive(Clone, Debug)]
 pub struct SearchOptions {
     pub topic: Option<String>,
     pub case_sensitive: bool,
     pub overview_only: bool,
     pub exact: bool,
     pub semantic: bool,
+    pub sort: SearchSort,
+    pub since: Option<DateTime<Utc>>,
+    pub until: Option<DateTime<Utc>>,
 }
 
 impl SearchOptions {
-    pub fn from(options: &SearchCommandOptions) -> Self {
-        Self {
+    pub fn from_command_options(options: &SearchCommandOptions) -> Result<Self> {
+        let request = SearchRequest {
+            terms: Vec::new(),
             topic: options.topic.clone(),
             case_sensitive: options.case_sensitive,
             overview_only: options.overview_only,
             exact: options.exact,
             semantic: options.semantic,
+            sort: options.sort,
+            since: options.since.clone(),
+            until: options.until.clone(),
+        };
+
+        Self::from_request(&request)
+    }
+
+    pub fn from_request(request: &SearchRequest) -> Result<Self> {
+        let now = Utc::now();
+        Ok(Self {
+            topic: request.topic.clone(),
+            case_sensitive: request.case_sensitive,
+            overview_only: request.overview_only,
+            exact: request.exact,
+            semantic: request.semantic,
+            sort: request.sort,
+            since: request
+                .since
+                .as_deref()
+                .map(|value| parse_since_date_filter(value, now))
+                .transpose()?,
+            until: request
+                .until
+                .as_deref()
+                .map(|value| parse_until_date_filter(value, now))
+                .transpose()?,
+        })
+    }
+}
+
+impl Default for SearchOptions {
+    fn default() -> Self {
+        Self {
+            topic: None,
+            case_sensitive: false,
+            overview_only: false,
+            exact: false,
+            semantic: false,
+            sort: SearchSort::Relevance,
+            since: None,
+            until: None,
         }
     }
+}
+
+enum DateBoundary {
+    StartOfDay,
+    EndOfDay,
+}
+
+pub fn parse_since_date_filter(input: &str, now: DateTime<Utc>) -> Result<DateTime<Utc>> {
+    parse_date_filter(input, now, DateBoundary::StartOfDay)
+}
+
+pub fn parse_until_date_filter(input: &str, now: DateTime<Utc>) -> Result<DateTime<Utc>> {
+    parse_date_filter(input, now, DateBoundary::EndOfDay)
+}
+
+fn parse_date_filter(
+    input: &str,
+    now: DateTime<Utc>,
+    date_boundary: DateBoundary,
+) -> Result<DateTime<Utc>> {
+    if let Some(relative_date) = parse_relative_date(input, now)? {
+        return Ok(relative_date);
+    }
+
+    if let Ok(timestamp) = DateTime::parse_from_rfc3339(input) {
+        return Ok(timestamp.with_timezone(&Utc));
+    }
+
+    if let Ok(date) = NaiveDate::parse_from_str(input, "%Y-%m-%d") {
+        let time = match date_boundary {
+            DateBoundary::StartOfDay => date.and_hms_nano_opt(0, 0, 0, 0),
+            DateBoundary::EndOfDay => date.and_hms_nano_opt(23, 59, 59, 999_999_999),
+        }
+        .ok_or_else(|| anyhow!("Invalid date: {input}"))?;
+
+        return Ok(Utc.from_utc_datetime(&time));
+    }
+
+    Err(anyhow!(
+        "Invalid date '{input}'. Use YYYY-MM-DD, RFC3339, or relative values like 7d, 16h, 20m, 1M, or 1Y"
+    ))
+}
+
+fn parse_relative_date(input: &str, now: DateTime<Utc>) -> Result<Option<DateTime<Utc>>> {
+    if input.len() < 2 {
+        return Ok(None);
+    }
+
+    let (amount, unit) = input.split_at(input.len() - 1);
+    if !amount.chars().all(|character| character.is_ascii_digit()) {
+        return Ok(None);
+    }
+
+    let amount = amount.parse::<u32>()?;
+    let relative_date = match unit {
+        "m" => now.checked_sub_signed(Duration::minutes(amount as i64)),
+        "h" => now.checked_sub_signed(Duration::hours(amount as i64)),
+        "d" => now.checked_sub_signed(Duration::days(amount as i64)),
+        "w" => now.checked_sub_signed(Duration::weeks(amount as i64)),
+        "M" => now.checked_sub_months(Months::new(amount)),
+        "Y" => now.checked_sub_months(Months::new(
+            amount
+                .checked_mul(12)
+                .ok_or_else(|| anyhow!("Relative year value is too large: {input}"))?,
+        )),
+        _ => return Ok(None),
+    };
+
+    relative_date
+        .ok_or_else(|| anyhow!("Relative date is out of range: {input}"))
+        .map(Some)
+}
+
+pub fn matches_date_range(insight: &insight::Insight, options: &SearchOptions) -> bool {
+    if let Some(since) = options.since {
+        if insight.last_updated < since {
+            return false;
+        }
+    }
+
+    if let Some(until) = options.until {
+        if insight.last_updated > until {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn sort_by_relevance(results: &mut [SearchResult]) {
+    results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.topic.cmp(&b.topic).then_with(|| a.name.cmp(&b.name)))
+    });
+}
+
+fn sort_by_requested_order(results: &mut [SearchResult], sort: SearchSort) {
+    match sort {
+        SearchSort::Relevance => sort_by_relevance(results),
+        SearchSort::Updated => results.sort_by(|a, b| {
+            b.updated_at
+                .cmp(&a.updated_at)
+                .then_with(|| a.topic.cmp(&b.topic).then_with(|| a.name.cmp(&b.name)))
+        }),
+        SearchSort::Created => results.sort_by(|a, b| {
+            b.created_at
+                .cmp(&a.created_at)
+                .then_with(|| a.topic.cmp(&b.topic).then_with(|| a.name.cmp(&b.name)))
+        }),
+    }
+}
+
+fn deduplicate_highest_scoring(results: &mut Vec<SearchResult>) {
+    sort_by_relevance(results);
+
+    let mut seen = std::collections::HashSet::new();
+    results.retain(|result| {
+        let key = (result.topic.clone(), result.name.clone());
+        seen.insert(key)
+    });
 }
 
 pub fn search(terms: &[String], options: &SearchOptions) -> Result<Vec<SearchResult>> {
@@ -83,20 +268,8 @@ pub fn search(terms: &[String], options: &SearchOptions) -> Result<Vec<SearchRes
     // Note: Embedding search is handled asynchronously in the server handler
     // and merged with these results there
 
-    results.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.topic.cmp(&b.topic).then_with(|| a.name.cmp(&b.name)))
-    });
-
-    // Deduplicate by keeping only the first occurrence of each (topic, name) pair
-    // Since we sorted by score descending, the first occurrence will be the highest scoring
-    let mut seen = std::collections::HashSet::new();
-    results.retain(|result| {
-        let key = (result.topic.clone(), result.name.clone());
-        seen.insert(key)
-    });
+    deduplicate_highest_scoring(&mut results);
+    sort_by_requested_order(&mut results, options.sort);
 
     Ok(results)
 }
@@ -139,6 +312,10 @@ fn search_insight(
     threshold: f32,
     options: &SearchOptions,
 ) -> Result<Option<SearchResult>> {
+    if !matches_date_range(insight, options) {
+        return Ok(None);
+    }
+
     let score = search_strategy(insight, terms, options);
     if score > threshold {
         Ok(Some(SearchResult {
@@ -147,6 +324,8 @@ fn search_insight(
             overview: insight.overview.to_string(),
             details: insight.details.to_string(),
             score,
+            created_at: insight.created_at,
+            updated_at: insight.last_updated,
         }))
     } else {
         Ok(None)
@@ -345,15 +524,84 @@ mod tests {
             overview_only: true,
             exact: false,
             semantic: true,
+            sort: SearchSort::Updated,
+            since: Some("7d".to_string()),
+            until: None,
         };
 
-        let options = SearchOptions::from(&cmd_options);
+        let options = SearchOptions::from_command_options(&cmd_options).unwrap();
 
         assert_eq!(options.topic, Some("test_topic".to_string()));
         assert!(options.case_sensitive);
         assert!(options.overview_only);
         assert!(!options.exact);
         assert!(options.semantic);
+        assert_eq!(options.sort, SearchSort::Updated);
+        assert!(options.since.is_some());
+        assert!(options.until.is_none());
+    }
+
+    #[test]
+    fn test_parse_date_filter_absolute_date_boundaries() {
+        let now = DateTime::parse_from_rfc3339("2026-04-24T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        let since = parse_since_date_filter("2026-04-01", now).unwrap();
+        let until = parse_until_date_filter("2026-04-01", now).unwrap();
+
+        assert_eq!(
+            since,
+            DateTime::parse_from_rfc3339("2026-04-01T00:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc)
+        );
+        assert_eq!(
+            until,
+            DateTime::parse_from_rfc3339("2026-04-01T23:59:59.999999999Z")
+                .unwrap()
+                .with_timezone(&Utc)
+        );
+    }
+
+    #[test]
+    fn test_parse_date_filter_relative_values() {
+        let now = DateTime::parse_from_rfc3339("2026-04-24T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        assert_eq!(
+            parse_since_date_filter("20m", now).unwrap(),
+            now - Duration::minutes(20)
+        );
+        assert_eq!(
+            parse_since_date_filter("16h", now).unwrap(),
+            now - Duration::hours(16)
+        );
+        assert_eq!(
+            parse_since_date_filter("7d", now).unwrap(),
+            now - Duration::days(7)
+        );
+        assert_eq!(
+            parse_since_date_filter("1M", now).unwrap(),
+            DateTime::parse_from_rfc3339("2026-03-24T12:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc)
+        );
+        assert_eq!(
+            parse_since_date_filter("1Y", now).unwrap(),
+            DateTime::parse_from_rfc3339("2025-04-24T12:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc)
+        );
+    }
+
+    #[test]
+    fn test_parse_date_filter_rejects_invalid_values() {
+        let now = Utc::now();
+
+        assert!(parse_since_date_filter("7q", now).is_err());
+        assert!(parse_since_date_filter("yesterday", now).is_err());
     }
 
     #[test]
@@ -365,6 +613,7 @@ mod tests {
             overview_only: true,
             exact: false,
             semantic: false,
+            ..SearchOptions::default()
         };
 
         let content = get_normalized_content(&insight, &options);
@@ -383,6 +632,7 @@ mod tests {
             overview_only: false,
             exact: false,
             semantic: false,
+            ..SearchOptions::default()
         };
 
         let content = get_normalized_content(&insight, &options);
@@ -399,6 +649,7 @@ mod tests {
             overview_only: false,
             exact: false,
             semantic: false,
+            ..SearchOptions::default()
         };
 
         let normalized = get_normalized_terms(&terms, &options);
@@ -414,6 +665,7 @@ mod tests {
             overview_only: false,
             exact: false,
             semantic: false,
+            ..SearchOptions::default()
         };
 
         let normalized = get_normalized_terms(&terms, &options);
@@ -430,6 +682,7 @@ mod tests {
             overview_only: false,
             exact: true,
             semantic: false,
+            ..SearchOptions::default()
         };
 
         let score = get_exact_match(&insight, &terms, &options);
@@ -447,6 +700,7 @@ mod tests {
             overview_only: false,
             exact: true,
             semantic: false,
+            ..SearchOptions::default()
         };
 
         let score = get_exact_match(&insight, &terms, &options);
@@ -464,6 +718,7 @@ mod tests {
             overview_only: false,
             exact: true,
             semantic: false,
+            ..SearchOptions::default()
         };
 
         let score = get_exact_match(&insight, &terms, &options);
@@ -477,6 +732,7 @@ mod tests {
                 overview_only: false,
                 exact: true,
                 semantic: false,
+                ..SearchOptions::default()
             },
         );
 
@@ -493,6 +749,7 @@ mod tests {
             overview_only: false,
             exact: true,
             semantic: false,
+            ..SearchOptions::default()
         };
 
         let score = get_exact_match(&insight, &terms, &options);
@@ -509,6 +766,7 @@ mod tests {
             overview_only: false,
             exact: true,
             semantic: false,
+            ..SearchOptions::default()
         };
 
         let result = search_insight(&insight, get_exact_match, &terms, 0.0, &options).unwrap();
@@ -532,6 +790,7 @@ mod tests {
             overview_only: false,
             exact: true,
             semantic: false,
+            ..SearchOptions::default()
         };
 
         let result = search_insight(&insight, get_exact_match, &terms, 1.0, &options).unwrap();
@@ -629,6 +888,8 @@ mod tests {
             overview: "Test overview".to_string(),
             details: "Test details".to_string(),
             score: 2.5,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
         };
 
         let terms = vec!["test".to_string()];
@@ -657,6 +918,8 @@ mod tests {
                 overview: "Overview 1".to_string(),
                 details: "Details 1".to_string(),
                 score: 1.0,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
             },
             SearchResult {
                 topic: "topic2".to_string(),
@@ -664,6 +927,8 @@ mod tests {
                 overview: "Overview 2".to_string(),
                 details: "Details 2".to_string(),
                 score: 2.0,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
             },
         ];
 
