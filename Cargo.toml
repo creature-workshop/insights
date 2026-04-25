@@ -72,7 +72,7 @@ ort = { version = "2.0.0-rc.10", default-features = false, features = [
 ndarray = { version = "0.17", optional = true }
 tokenizers = { version = "0.21", default-features = false, features = ["onig"], optional = true }
 hf-hub = { version = "0.5", default-features = false, features = ["tokio"], optional = true }
-safetensors = { version = "0.6", optional = true }
+safetensors = { version = "0.7", optional = true }
 
 [dev-dependencies]
 assert_cmd = "2.0"
