@@ -505,6 +505,7 @@ mod tests {
     use super::*;
     use crate::server::models::insight::Insight;
     use colored::control;
+    use serial_test::serial;
 
     // Mock insight for testing
     fn create_test_insight() -> Insight {
@@ -798,6 +799,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_highlight_keywords_basic() {
         // Force color output for this test
         control::set_override(true);
@@ -815,6 +817,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_highlight_keywords_multiple_terms() {
         control::set_override(true);
 
@@ -848,6 +851,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_highlight_keywords_case_insensitive() {
         control::set_override(true);
 
