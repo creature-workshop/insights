@@ -3576,7 +3576,7 @@ dependencies = [
  "hf-hub",
  "lancedb",
  "mockall",
- "ndarray 0.16.1",
+ "ndarray 0.17.2",
  "once_cell",
  "ort",
  "predicates",
