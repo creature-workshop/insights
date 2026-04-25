@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
-use dirs::home_dir;
+use dirs::{data_dir, home_dir};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -233,13 +233,27 @@ pub fn delete(insight: &Insight) -> Result<()> {
 }
 
 pub fn get_insights_root() -> Result<PathBuf> {
-    // Allow tests or callers to override the root directory via env var
     if let Ok(custom_root) = std::env::var("INSIGHTS_ROOT") {
         return Ok(PathBuf::from(custom_root));
     }
 
-    let home = home_dir().ok_or_else(|| anyhow!("Could not find home directory"))?;
-    Ok(home.join(".blizz").join("persistent").join("insights"))
+    // XDG Base Directory: $XDG_DATA_HOME/insights (typically ~/.local/share/insights)
+    let xdg_base = data_dir().or_else(|| home_dir().map(|h| h.join(".local").join("share")));
+    let xdg_insights = xdg_base.map(|b| b.join("insights"));
+    let legacy = home_dir().map(|h| h.join(".blizz").join("persistent").join("insights"));
+
+    if let Some(ref path) = xdg_insights {
+        if path.exists() {
+            return Ok(path.clone());
+        }
+    }
+    if let Some(ref path) = legacy {
+        if path.exists() {
+            return Ok(path.clone());
+        }
+    }
+    xdg_insights
+        .ok_or_else(|| anyhow!("Could not resolve insights data directory (set INSIGHTS_ROOT)"))
 }
 
 pub fn get_valid_insights_dir() -> Result<std::path::PathBuf> {

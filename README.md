@@ -21,7 +21,7 @@ Knowledge management and insight storage system. Store, search, and retrieve str
 
 ```bash
 # Start the server
-insights_server --bind 127.0.0.1:3000
+insights_server --bind 127.0.0.1:2020
 
 # CLI commands
 insights search "rust async patterns"

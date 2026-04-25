@@ -9,6 +9,7 @@ use std::time::Duration;
 use tokio::time::sleep;
 
 use crate::cli::client::{get_client, InsightsClient};
+use crate::cli::server_config;
 
 // Server startup configuration
 const SERVER_STARTUP_TIMEOUT_SECS: u64 = 30; // 30 seconds total timeout
@@ -57,9 +58,11 @@ impl ServerManager {
     async fn start_server(&self) -> Result<Child> {
         // Try to find the insights_server binary
         let server_binary = self.find_server_binary()?;
+        let bind = server_config::get_insights_server_bind()?;
+        let bind_str = bind.to_string();
 
         let mut cmd = Command::new(server_binary);
-        cmd.args(["--bind", "127.0.0.1:3000"])
+        cmd.args(["--bind", &bind_str])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .stdin(Stdio::null())

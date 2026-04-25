@@ -6,6 +6,8 @@
 use anyhow::{anyhow, Result};
 use reqwest::Client;
 
+use super::server_config;
+
 use std::time::Duration;
 use tokio::time::timeout;
 
@@ -38,7 +40,7 @@ impl std::fmt::Display for HttpMethod {
 /// Configuration for the insights HTTP client
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
-    /// Base URL of the insights server (e.g., "http://localhost:3000")
+    /// Base URL of the insights server (e.g., "http://localhost:2020")
     pub base_url: String,
     /// Request timeout in seconds
     pub timeout_secs: u64,
@@ -47,7 +49,7 @@ pub struct ClientConfig {
 impl Default for ClientConfig {
     fn default() -> Self {
         Self {
-            base_url: "http://localhost:3000".to_string(),
+            base_url: server_config::DEFAULT_INSIGHTS_SERVER_URL.to_string(),
             timeout_secs: 30,
         }
     }
@@ -332,8 +334,7 @@ impl InsightsClient {
 
 /// Get the configured client (checks environment variables)
 pub fn get_client() -> InsightsClient {
-    let base_url = std::env::var("INSIGHTS_SERVER_URL")
-        .unwrap_or_else(|_| "http://localhost:3000".to_string());
+    let base_url = server_config::get_insights_server_url();
 
     let timeout_secs = std::env::var("INSIGHTS_TIMEOUT_SECS")
         .ok()

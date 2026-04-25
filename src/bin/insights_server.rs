@@ -8,6 +8,7 @@ use clap::Parser;
 use std::net::SocketAddr;
 use tracing_subscriber::{filter::EnvFilter, fmt, prelude::*};
 
+use insights::cli::server_config;
 use insights::server::startup::start_server;
 
 #[derive(Parser)]
@@ -15,9 +16,9 @@ use insights::server::startup::start_server;
 #[command(about = "Insights REST API Server")]
 #[command(version = concat!(env!("CARGO_PKG_VERSION"), ", courtesy of Blizz and Kernelle Software"))]
 struct Args {
-    /// Server bind address  
-    #[arg(long, default_value = "127.0.0.1:3000")]
-    bind: SocketAddr,
+    /// Listen address (overrides `INSIGHTS_SERVER_URL` when set)
+    #[arg(long)]
+    bind: Option<SocketAddr>,
 
     /// Enable verbose logging
     #[arg(short, long)]
@@ -27,6 +28,11 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    let bind = if let Some(addr) = args.bind {
+        addr
+    } else {
+        server_config::get_insights_server_bind()?
+    };
 
     // Initialize logging with reduced verbosity for Lance and other noisy libraries
     let filter = if args.verbose {
@@ -46,10 +52,10 @@ async fn main() -> Result<()> {
         "Starting Insights REST Server v{}",
         env!("CARGO_PKG_VERSION")
     ));
-    bentley::info!(&format!("Binding to address: {}", args.bind));
+    bentley::info!(&format!("Binding to address: {bind}"));
 
     // Start the server
-    start_server(args.bind).await?;
+    start_server(bind).await?;
 
     Ok(())
 }
