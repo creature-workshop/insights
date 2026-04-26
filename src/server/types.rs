@@ -296,6 +296,10 @@ pub struct SearchRequest {
     /// Include insights updated on or before this absolute or relative date
     #[serde(default)]
     pub until: Option<String>,
+
+    /// Maximum number of results to return (-1 for unlimited, default server behavior if omitted)
+    #[serde(default)]
+    pub max_results: Option<i32>,
 }
 
 /// Search result data
@@ -492,6 +496,7 @@ mod tests {
             sort: SearchSort::Relevance,
             since: None,
             until: None,
+            max_results: None,
         };
 
         // These should all be false by default due to #[serde(default)]

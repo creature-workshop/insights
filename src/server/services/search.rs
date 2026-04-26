@@ -18,6 +18,8 @@ const SEMANTIC_SIMILARITY_THRESHOLD: f32 = 0.2;
 // Default terminal width for text wrapping
 const DEFAULT_TERMINAL_WIDTH: usize = 80;
 
+const DEFAULT_MAX_RESULTS: usize = 10;
+
 #[derive(Debug)]
 pub struct SearchResult {
     pub topic: String,
@@ -56,6 +58,15 @@ pub struct SearchCommandOptions {
     /// Include insights updated on or before a date (YYYY-MM-DD, RFC3339, or relative like 7d)
     #[arg(long)]
     pub until: Option<String>,
+    /// Maximum number of results to return (default: 10, -1 for unlimited)
+    #[arg(
+        short = 'n',
+        long,
+        alias = "max",
+        short_alias = 'm',
+        default_value = "10"
+    )]
+    pub max_results: i32,
 }
 
 #[derive(Clone, Debug)]
@@ -68,6 +79,8 @@ pub struct SearchOptions {
     pub sort: SearchSort,
     pub since: Option<DateTime<Utc>>,
     pub until: Option<DateTime<Utc>>,
+    /// None = no limit, Some(n) = limit to n results
+    pub max_results: Option<usize>,
 }
 
 impl SearchOptions {
@@ -82,6 +95,7 @@ impl SearchOptions {
             sort: options.sort,
             since: options.since.clone(),
             until: options.until.clone(),
+            max_results: Some(options.max_results),
         };
 
         Self::from_request(&request)
@@ -106,6 +120,7 @@ impl SearchOptions {
                 .as_deref()
                 .map(|value| parse_until_date_filter(value, now))
                 .transpose()?,
+            max_results: parse_max_results(request.max_results),
         })
     }
 }
@@ -121,7 +136,16 @@ impl Default for SearchOptions {
             sort: SearchSort::Relevance,
             since: None,
             until: None,
+            max_results: Some(DEFAULT_MAX_RESULTS),
         }
+    }
+}
+
+fn parse_max_results(value: Option<i32>) -> Option<usize> {
+    match value {
+        Some(n) if n < 0 => None,
+        Some(n) => Some(n as usize),
+        None => Some(DEFAULT_MAX_RESULTS),
     }
 }
 
@@ -270,6 +294,10 @@ pub fn search(terms: &[String], options: &SearchOptions) -> Result<Vec<SearchRes
 
     deduplicate_highest_scoring(&mut results);
     sort_by_requested_order(&mut results, options.sort);
+
+    if let Some(limit) = options.max_results {
+        results.truncate(limit);
+    }
 
     Ok(results)
 }
@@ -528,6 +556,7 @@ mod tests {
             sort: SearchSort::Updated,
             since: Some("7d".to_string()),
             until: None,
+            max_results: 10,
         };
 
         let options = SearchOptions::from_command_options(&cmd_options).unwrap();

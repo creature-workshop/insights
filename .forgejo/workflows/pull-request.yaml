@@ -27,8 +27,7 @@ jobs:
             rust-
       - run: shell/.ops/init --no-install
       - run: shell/action rust setup stable rustfmt clippy
-      - run: cargo fmt --check
-      - run: cargo clippy --no-default-features -- -D warnings
+      - run: shell/action rust lint
 
   security:
     runs-on: ubuntu-22.04
@@ -51,8 +50,7 @@ jobs:
             rust-
       - run: shell/.ops/init --no-install
       - run: shell/action rust setup
-      - run: cargo install cargo-audit --locked
-      - run: cargo audit
+      - run: shell/action rust security
 
   test:
     runs-on: ubuntu-22.04

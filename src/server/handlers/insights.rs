@@ -925,11 +925,18 @@ pub async fn search_insights(
 
     if should_finalize {
         Ok(ResponseJson(
-            finalize_search_results(&context, &request, all_results, transaction_id).await,
+            finalize_search_results(
+                &context,
+                &request,
+                &search_options,
+                all_results,
+                transaction_id,
+            )
+            .await,
         ))
     } else {
-        // No embeddings available - return results as-is
         sort_and_deduplicate_results(&mut all_results, request.sort);
+        apply_max_results_limit(&mut all_results, &search_options);
         let response_data = SearchResponse {
             count: all_results.len(),
             results: all_results,
@@ -1161,10 +1168,12 @@ enum EmbeddingAvailability {
 async fn finalize_search_results(
     context: &RequestContext,
     request: &SearchRequest,
+    search_options: &crate::server::services::search::SearchOptions,
     mut all_results: Vec<SearchResultData>,
     transaction_id: Uuid,
 ) -> BaseResponse<SearchResponse> {
     sort_and_deduplicate_results(&mut all_results, request.sort);
+    apply_max_results_limit(&mut all_results, search_options);
 
     context
         .log_success(
@@ -1182,6 +1191,15 @@ async fn finalize_search_results(
         results: all_results,
     };
     BaseResponse::success(response_data, transaction_id)
+}
+
+fn apply_max_results_limit(
+    results: &mut Vec<SearchResultData>,
+    options: &crate::server::services::search::SearchOptions,
+) {
+    if let Some(limit) = options.max_results {
+        results.truncate(limit);
+    }
 }
 
 fn sort_and_deduplicate_results(
