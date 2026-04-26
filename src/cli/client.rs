@@ -13,8 +13,8 @@ use tokio::time::timeout;
 
 use crate::server::types::{
     AddInsightRequest, BaseResponse, GetInsightRequest, GetInsightResponse, InsightFilter,
-    ListInsightsResponse, ListTopicsResponse, RemoveInsightRequest, SearchRequest, SearchResponse,
-    UpdateInsightRequest,
+    ListInsightsResponse, ListTopicsResponse, PinInsightRequest, RemoveInsightRequest,
+    SearchRequest, SearchResponse, UpdateInsightRequest,
 };
 
 /// HTTP method types for REST API calls
@@ -170,6 +170,28 @@ impl InsightsClient {
         };
 
         self.delete_json::<RemoveInsightRequest, ()>("/insights/remove", &request)
+            .await
+    }
+
+    /// Pin an insight
+    pub async fn pin_insight(&self, topic: &str, name: &str) -> Result<()> {
+        let request = PinInsightRequest {
+            topic: topic.to_string(),
+            name: name.to_string(),
+        };
+
+        self.put_json::<PinInsightRequest, ()>("/insights/pin", &request)
+            .await
+    }
+
+    /// Unpin an insight
+    pub async fn unpin_insight(&self, topic: &str, name: &str) -> Result<()> {
+        let request = PinInsightRequest {
+            topic: topic.to_string(),
+            name: name.to_string(),
+        };
+
+        self.delete_json::<PinInsightRequest, ()>("/insights/unpin", &request)
             .await
     }
 

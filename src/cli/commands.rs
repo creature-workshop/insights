@@ -44,24 +44,33 @@ pub async fn get_insight(topic: &str, name: &str, overview_only: bool) -> Result
     Ok(())
 }
 
-pub async fn list_insights(filter: Option<&str>, verbose: bool) -> Result<()> {
+pub async fn list_insights(
+    filter: Option<&str>,
+    verbose: bool,
+    pinned_only: bool,
+    sort: crate::server::types::SearchSort,
+) -> Result<()> {
     ensure_server_running().await?;
 
     let client = get_client();
-    let response = client.list_insights(Vec::new()).await?; // TODO: Add topic filtering
+    let response = client.list_insights(Vec::new()).await?;
 
-    let insights = if let Some(topic_filter) = filter {
-        response
-            .insights
-            .into_iter()
-            .filter(|insight| insight.topic == topic_filter)
-            .collect::<Vec<_>>()
-    } else {
-        response.insights
-    };
+    let mut insights: Vec<_> = response
+        .insights
+        .into_iter()
+        .filter(|insight| {
+            let topic_match = filter.is_none_or(|t| insight.topic == t);
+            let pin_match = !pinned_only || insight.pinned;
+            topic_match && pin_match
+        })
+        .collect();
+
+    sort_insight_summaries(&mut insights, sort);
 
     if insights.is_empty() {
-        if let Some(topic) = filter {
+        if pinned_only {
+            println!("No pinned insights found.");
+        } else if let Some(topic) = filter {
             println!("No insights found for topic: {}", topic.yellow());
         } else {
             println!("No insights found.");
@@ -69,7 +78,6 @@ pub async fn list_insights(filter: Option<&str>, verbose: bool) -> Result<()> {
         return Ok(());
     }
 
-    // Group by topic for better display
     use std::collections::BTreeMap;
     let mut by_topic: BTreeMap<String, Vec<_>> = BTreeMap::new();
     for insight in insights {
@@ -83,20 +91,95 @@ pub async fn list_insights(filter: Option<&str>, verbose: bool) -> Result<()> {
         println!("{} {}", "📂".cyan(), topic.blue().bold());
 
         for insight in insights {
+            let pin_indicator = if insight.pinned { " 📌" } else { "" };
+
             if verbose {
+                let total_access = insight.retrieval_count + insight.search_hit_count;
+                let access_info = format!(
+                    "gets:{} hits:{} total:{}",
+                    insight.retrieval_count, insight.search_hit_count, total_access
+                );
+                let last_accessed_info = insight
+                    .last_accessed
+                    .map(|ts| format!(" last:{}", ts.format("%Y-%m-%d")))
+                    .unwrap_or_default();
+
                 println!(
-                    "  {} {} - {}",
+                    "  {} {}{} - {}",
                     "📄".yellow(),
                     insight.name.bold(),
+                    pin_indicator,
                     insight.overview.dimmed()
                 );
+                println!(
+                    "      {}{}",
+                    access_info.dimmed(),
+                    last_accessed_info.dimmed()
+                );
             } else {
-                println!("  {} {}", "📄".yellow(), insight.name.bold());
+                println!(
+                    "  {} {}{}",
+                    "📄".yellow(),
+                    insight.name.bold(),
+                    pin_indicator
+                );
             }
         }
         println!();
     }
 
+    Ok(())
+}
+
+fn sort_insight_summaries(
+    insights: &mut [crate::server::types::InsightSummary],
+    sort: crate::server::types::SearchSort,
+) {
+    match sort {
+        crate::server::types::SearchSort::Relevance => {}
+        crate::server::types::SearchSort::Updated => {
+            insights.sort_by_key(|b| std::cmp::Reverse(b.updated_at));
+        }
+        crate::server::types::SearchSort::Created => {
+            insights.sort_by_key(|b| std::cmp::Reverse(b.created_at));
+        }
+        crate::server::types::SearchSort::LeastAccessed => {
+            insights.sort_by(|a, b| {
+                let a_total = a.retrieval_count + a.search_hit_count;
+                let b_total = b.retrieval_count + b.search_hit_count;
+                a_total
+                    .cmp(&b_total)
+                    .then_with(|| a.last_accessed.cmp(&b.last_accessed))
+            });
+        }
+    }
+}
+
+pub async fn pin_insight(topic: &str, name: &str) -> Result<()> {
+    ensure_server_running().await?;
+    let client = get_client();
+    client.pin_insight(topic, name).await?;
+
+    println!(
+        "{} Pinned insight {}/{}",
+        "📌".cyan(),
+        topic.cyan(),
+        name.yellow()
+    );
+    Ok(())
+}
+
+pub async fn unpin_insight(topic: &str, name: &str) -> Result<()> {
+    ensure_server_running().await?;
+    let client = get_client();
+    client.unpin_insight(topic, name).await?;
+
+    println!(
+        "{} Unpinned insight {}/{}",
+        "✓".green(),
+        topic.cyan(),
+        name.yellow()
+    );
     Ok(())
 }
 

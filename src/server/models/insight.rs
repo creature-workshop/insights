@@ -43,6 +43,14 @@ pub struct InsightMetaData {
     pub last_updated: DateTime<Utc>,
     #[serde(default)]
     pub update_count: u32,
+    #[serde(default)]
+    pub retrieval_count: u32,
+    #[serde(default)]
+    pub search_hit_count: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_accessed: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub pinned: bool,
 
     // Embedding metadata - excluded from files (set to None in write_to_file)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -67,6 +75,14 @@ struct InsightTemporalMetadata {
     created_at: DateTime<Utc>,
     last_updated: DateTime<Utc>,
     update_count: u32,
+    #[serde(default)]
+    retrieval_count: u32,
+    #[serde(default)]
+    search_hit_count: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_accessed: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pinned: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,6 +102,12 @@ pub struct Insight {
     pub last_updated: DateTime<Utc>,
     pub update_count: u32,
 
+    // Usage metadata
+    pub retrieval_count: u32,
+    pub search_hit_count: u32,
+    pub last_accessed: Option<DateTime<Utc>>,
+    pub pinned: bool,
+
     // Embedding metadata (None if not computed yet)
     pub embedding_version: Option<String>,
     pub embedding: Option<Vec<f32>>,
@@ -104,6 +126,10 @@ impl Insight {
             created_at: now,
             last_updated: now,
             update_count: 0,
+            retrieval_count: 0,
+            search_hit_count: 0,
+            last_accessed: None,
+            pinned: false,
             embedding_version: None,
             embedding: None,
             embedding_text: None,
@@ -150,6 +176,10 @@ fn write_to_file(insight: &Insight, file_path: &PathBuf) -> Result<()> {
             created_at: insight.created_at,
             last_updated: insight.last_updated,
             update_count: insight.update_count,
+            retrieval_count: insight.retrieval_count,
+            search_hit_count: insight.search_hit_count,
+            last_accessed: insight.last_accessed,
+            pinned: insight.pinned,
         },
     };
 
@@ -240,6 +270,46 @@ pub fn update(
     Ok(())
 }
 
+const ACCESS_DEBOUNCE_MINUTES: i64 = 5;
+
+#[derive(Debug, Clone, Copy)]
+pub enum AccessType {
+    Retrieval,
+    SearchHit,
+}
+
+pub fn record_access(insight: &mut Insight, access_type: AccessType) -> Result<()> {
+    let now = Utc::now();
+
+    if let Some(last) = insight.last_accessed {
+        let elapsed = now.signed_duration_since(last);
+        if elapsed.num_minutes() < ACCESS_DEBOUNCE_MINUTES {
+            return Ok(());
+        }
+    }
+
+    match access_type {
+        AccessType::Retrieval => insight.retrieval_count += 1,
+        AccessType::SearchHit => insight.search_hit_count += 1,
+    }
+    insight.last_accessed = Some(now);
+
+    let file_path = file_path(insight)?;
+    write_to_file(insight, &file_path)
+}
+
+pub fn pin(insight: &mut Insight) -> Result<()> {
+    insight.pinned = true;
+    let file_path = file_path(insight)?;
+    write_to_file(insight, &file_path)
+}
+
+pub fn unpin(insight: &mut Insight) -> Result<()> {
+    insight.pinned = false;
+    let file_path = file_path(insight)?;
+    write_to_file(insight, &file_path)
+}
+
 pub fn clear_embedding(insight: &mut Insight) {
     insight.embedding_version = None;
     insight.embedding = None;
@@ -324,6 +394,10 @@ fn parse_yaml_format(frontmatter_section: &str, body: &str) -> Result<(InsightMe
         frontmatter.created_at = metadata.created_at;
         frontmatter.last_updated = metadata.last_updated;
         frontmatter.update_count = metadata.update_count;
+        frontmatter.retrieval_count = metadata.retrieval_count;
+        frontmatter.search_hit_count = metadata.search_hit_count;
+        frontmatter.last_accessed = metadata.last_accessed;
+        frontmatter.pinned = metadata.pinned;
     }
 
     let details = clean_body_content(body_without_metadata);
@@ -364,6 +438,10 @@ fn parse_legacy_format_no_frontmatter(content: &str) -> (InsightMetaData, String
         created_at: default_created_at(),
         last_updated: default_last_updated(),
         update_count: 0,
+        retrieval_count: 0,
+        search_hit_count: 0,
+        last_accessed: None,
+        pinned: false,
         embedding_version: None,
         embedding: None,
         embedding_text: None,
@@ -384,6 +462,10 @@ fn parse_legacy_format(frontmatter_section: &str, body: &str) -> (InsightMetaDat
         created_at: default_created_at(),
         last_updated: default_last_updated(),
         update_count: 0,
+        retrieval_count: 0,
+        search_hit_count: 0,
+        last_accessed: None,
+        pinned: false,
         embedding_version: None,
         embedding: None,
         embedding_text: None,
@@ -556,6 +638,10 @@ fn parse_insight_from_content(topic: &str, name: &str, content: &str) -> Result<
         created_at: fm.created_at,
         last_updated: fm.last_updated,
         update_count: fm.update_count,
+        retrieval_count: fm.retrieval_count,
+        search_hit_count: fm.search_hit_count,
+        last_accessed: fm.last_accessed,
+        pinned: fm.pinned,
         embedding_version: fm.embedding_version,
         embedding: fm.embedding,
         embedding_text: fm.embedding_text,

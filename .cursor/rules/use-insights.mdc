@@ -15,8 +15,10 @@ insights search <terms...> [-t topic] [-e exact]     # Search across all insight
 insights get <topic> <name> [-o overview-only]        # Retrieve a specific insight
 insights update <topic> <name> [-o overview] [-d details]  # Update an existing insight
 insights delete <topic> <name> [-f force]             # Remove an insight
-insights list [topic] [-v verbose]                    # List insights, optionally filtered
+insights list [topic] [-v] [--pinned] [--sort=X]     # List insights, optionally filtered
 insights topics                                       # List all topics
+insights pin <topic> <name>                          # Protect insight from pruning
+insights unpin <topic> <name>                        # Remove pruning protection
 ```
 
 ## When to Use Insights
@@ -27,9 +29,30 @@ insights topics                                       # List all topics
 
 **When you discover something:** Add insights for problem-solution patterns, configuration that works well, workflow optimizations, integration patterns, and niche discoveries about a codebase.
 
-**When you find stale info:** If an insight contradicts what you observe, stop, verify with available tools, and `insights update` the bad information. If the insight is completely out of date and/or misleading, you can simply delete the insight entirely and create a new one.
+**When you find stale info:** If an insight contradicts what you observe, stop, verify with available tools, and `insights update` the bad information. Before deleting, check usage stats with `insights list -v` — high retrieval or search hit counts suggest the insight is valuable even if the content seems stale. Prefer updating over deleting for frequently accessed insights.
 
 **At the end of work:** Summarize what was done with one final insight.
+
+## Pinning Insights
+
+Pinned insights are protected from pruning and receive a small relevance boost in search results. Use `insights pin` and `insights unpin` to manage them.
+
+**When to pin:**
+- Insights that are foundational to the codebase or workflow
+- Insights the user explicitly asks to preserve
+- Insights you observe being referenced repeatedly across sessions
+
+**When to unpin:** When an insight is no longer relevant or has been superseded by a better one.
+
+**Never delete a pinned insight** without explicitly confirming with the user. If the content is stale, update it instead.
+
+## Usage-Aware Decisions
+
+Insights automatically track how often they are retrieved (`get`) and how often they appear in search results. Use `insights list -v` to see usage stats.
+
+- Before deleting, check access counts — a frequently accessed insight deserves an update, not deletion
+- Use `insights list --sort=least-accessed` to find pruning candidates
+- Use `insights list --pinned` to review which insights are protected
 
 ## What Makes a Good Insight
 

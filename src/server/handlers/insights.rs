@@ -9,15 +9,17 @@ use axum::{
     extract::{Extension, Json},
     response::Json as ResponseJson,
 };
-use chrono::Utc;
 use uuid::Uuid;
 
 use crate::server::types::{
     AddInsightRequest, ApiError, BaseResponse, GetInsightRequest, GetInsightResponse, InsightData,
-    InsightSummary, ListInsightsResponse, ListTopicsResponse, RemoveInsightRequest, SearchRequest,
-    SearchResponse, SearchResultData, UpdateInsightRequest,
+    InsightSummary, ListInsightsResponse, ListTopicsResponse, PinInsightRequest,
+    RemoveInsightRequest, SearchRequest, SearchResponse, SearchResultData, UpdateInsightRequest,
 };
-use crate::server::{middleware::RequestContext, models::insight};
+use crate::server::{
+    middleware::RequestContext,
+    models::insight::{self, AccessType},
+};
 
 /// PUT /insights/update - Update an existing insight
 pub async fn update_insight(
@@ -123,6 +125,66 @@ fn create_insight_update_error(
     let api_error = ApiError::new(
         "insight_update_failed",
         &format!("Failed to update insight: {error}"),
+    );
+    (
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        ResponseJson(BaseResponse::<()>::error(vec![api_error], transaction_id)),
+    )
+}
+
+/// PUT /insights/pin - Pin an insight to protect from pruning
+pub async fn pin_insight(
+    Extension(context): Extension<RequestContext>,
+    Json(request): Json<PinInsightRequest>,
+) -> Result<ResponseJson<BaseResponse<()>>, (axum::http::StatusCode, ResponseJson<BaseResponse<()>>)>
+{
+    let transaction_id = Uuid::new_v4();
+
+    let mut insight_data = insight::load(&request.topic, &request.name)
+        .map_err(|e| create_insight_not_found_error(e, transaction_id))?;
+
+    insight::pin(&mut insight_data).map_err(|e| create_pin_error(e, transaction_id))?;
+
+    context
+        .log_success(
+            &format!("Pinned insight {}/{}", request.topic, request.name),
+            "insights-api",
+        )
+        .await;
+
+    Ok(ResponseJson(BaseResponse::success((), transaction_id)))
+}
+
+/// DELETE /insights/unpin - Unpin an insight
+pub async fn unpin_insight(
+    Extension(context): Extension<RequestContext>,
+    Json(request): Json<PinInsightRequest>,
+) -> Result<ResponseJson<BaseResponse<()>>, (axum::http::StatusCode, ResponseJson<BaseResponse<()>>)>
+{
+    let transaction_id = Uuid::new_v4();
+
+    let mut insight_data = insight::load(&request.topic, &request.name)
+        .map_err(|e| create_insight_not_found_error(e, transaction_id))?;
+
+    insight::unpin(&mut insight_data).map_err(|e| create_pin_error(e, transaction_id))?;
+
+    context
+        .log_success(
+            &format!("Unpinned insight {}/{}", request.topic, request.name),
+            "insights-api",
+        )
+        .await;
+
+    Ok(ResponseJson(BaseResponse::success((), transaction_id)))
+}
+
+fn create_pin_error(
+    error: anyhow::Error,
+    transaction_id: Uuid,
+) -> (axum::http::StatusCode, ResponseJson<BaseResponse<()>>) {
+    let api_error = ApiError::new(
+        "insight_pin_failed",
+        &format!("Failed to update pin status: {error}"),
     );
     (
         axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -577,7 +639,8 @@ async fn score_single_result(
                 "{} {} {} {}",
                 result.topic, result.name, result.overview, result.details
             );
-            let score = compute_relevance_score(query_text, &doc_text, &result).await;
+            let base_score = compute_relevance_score(query_text, &doc_text, &result).await;
+            let score = base_score * crate::server::services::search::usage_boost(&full_insight);
 
             Some(SearchResultData {
                 topic: result.topic,
@@ -693,8 +756,12 @@ pub async fn list_insights() -> Result<
                     topic: insight.topic,
                     name: insight.name,
                     overview: insight.overview,
-                    created_at: insight.embedding_computed.unwrap_or_else(Utc::now),
-                    updated_at: insight.embedding_computed.unwrap_or_else(Utc::now),
+                    pinned: insight.pinned,
+                    retrieval_count: insight.retrieval_count,
+                    search_hit_count: insight.search_hit_count,
+                    last_accessed: insight.last_accessed,
+                    created_at: insight.created_at,
+                    updated_at: insight.last_updated,
                 })
                 .collect();
 
@@ -850,7 +917,19 @@ pub async fn get_insight(
         .await;
 
     match insight::load(&request.topic, &request.name) {
-        Ok(insight_data) => {
+        Ok(mut insight_data) => {
+            if let Err(e) = insight::record_access(&mut insight_data, AccessType::Retrieval) {
+                context
+                    .log_warn(
+                        &format!(
+                            "Failed to record access for {}/{}: {e}",
+                            request.topic, request.name
+                        ),
+                        "insights-api",
+                    )
+                    .await;
+            }
+
             context
                 .log_success(
                     &format!(
@@ -870,6 +949,10 @@ pub async fn get_insight(
                 } else {
                     insight_data.details
                 },
+                pinned: insight_data.pinned,
+                retrieval_count: insight_data.retrieval_count,
+                search_hit_count: insight_data.search_hit_count,
+                last_accessed: insight_data.last_accessed,
                 embedding_version: insight_data.embedding_version,
                 embedding_computed: insight_data.embedding_computed,
             };
@@ -937,6 +1020,7 @@ pub async fn search_insights(
     } else {
         sort_and_deduplicate_results(&mut all_results, request.sort);
         apply_max_results_limit(&mut all_results, &search_options);
+        spawn_search_hit_tracking(&all_results);
         let response_data = SearchResponse {
             count: all_results.len(),
             results: all_results,
@@ -1164,6 +1248,19 @@ enum EmbeddingAvailability {
     Error,
 }
 
+/// Spawn fire-and-forget tasks to record search hit access for each result
+fn spawn_search_hit_tracking(results: &[SearchResultData]) {
+    for result in results {
+        let topic = result.topic.clone();
+        let name = result.name.clone();
+        tokio::spawn(async move {
+            if let Ok(mut insight_data) = insight::load(&topic, &name) {
+                let _ = insight::record_access(&mut insight_data, AccessType::SearchHit);
+            }
+        });
+    }
+}
+
 /// Sort, deduplicate, and create final response
 async fn finalize_search_results(
     context: &RequestContext,
@@ -1174,6 +1271,7 @@ async fn finalize_search_results(
 ) -> BaseResponse<SearchResponse> {
     sort_and_deduplicate_results(&mut all_results, request.sort);
     apply_max_results_limit(&mut all_results, search_options);
+    spawn_search_hit_tracking(&all_results);
 
     context
         .log_success(
@@ -1242,6 +1340,14 @@ fn sort_results_by_requested_order(
                 .cmp(&a.created_at)
                 .then_with(|| a.topic.cmp(&b.topic).then_with(|| a.name.cmp(&b.name)))
         }),
+        crate::server::types::SearchSort::LeastAccessed => {
+            results.sort_by(|a, b| {
+                a.score
+                    .partial_cmp(&b.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| a.topic.cmp(&b.topic).then_with(|| a.name.cmp(&b.name)))
+            });
+        }
     }
 }
 

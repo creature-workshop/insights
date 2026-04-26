@@ -258,6 +258,7 @@ fn sort_by_requested_order(results: &mut [SearchResult], sort: SearchSort) {
                 .cmp(&a.created_at)
                 .then_with(|| a.topic.cmp(&b.topic).then_with(|| a.name.cmp(&b.name)))
         }),
+        SearchSort::LeastAccessed => sort_by_relevance(results),
     }
 }
 
@@ -344,7 +345,8 @@ fn search_insight(
         return Ok(None);
     }
 
-    let score = search_strategy(insight, terms, options);
+    let base_score = search_strategy(insight, terms, options);
+    let score = base_score * usage_boost(insight);
     if score > threshold {
         Ok(Some(SearchResult {
             topic: insight.topic.to_string(),
@@ -358,6 +360,23 @@ fn search_insight(
     } else {
         Ok(None)
     }
+}
+
+pub fn usage_boost(insight: &insight::Insight) -> f32 {
+    let access_total = (insight.retrieval_count + insight.search_hit_count) as f32;
+    let activity_boost = (1.0 + access_total).ln() * 0.1;
+
+    let recency_boost = match insight.last_accessed {
+        Some(ts) => {
+            let days_ago = (Utc::now() - ts).num_days().max(0) as f32;
+            0.1 * (-days_ago / 90.0).exp()
+        }
+        None => 0.0,
+    };
+
+    let pin_boost = if insight.pinned { 0.15 } else { 0.0 };
+
+    1.0 + activity_boost + recency_boost + pin_boost
 }
 
 fn get_normalized_content(insight: &insight::Insight, options: &SearchOptions) -> String {
