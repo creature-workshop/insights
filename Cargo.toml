@@ -63,7 +63,7 @@ async-trait = "0.1"
 
 lancedb = { version = "0.27.0", default-features = false, optional = true }
 arrow = { version = "58", features = ["json"], optional = true }
-arrow-json = { version = "55", optional = true }
+arrow-json = { version = "58", optional = true }
 futures = "0.3"
 
 ort = { version = "2.0.0-rc.10", default-features = false, features = [
