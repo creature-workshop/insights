@@ -5,9 +5,9 @@
   "org": "kernelle-soft",
   "linear-team": "OPS",
   "repo": "insights",
-  "latest": "0.14.8",
-  "stable": "0.14.8",
-  "releases": 20,
+  "latest": "0.14.9",
+  "stable": "0.14.9",
+  "releases": 21,
   "naming": {
     "major": "",
     "minor": "",
