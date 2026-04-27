@@ -13,12 +13,12 @@ use crate::server::{
 };
 
 // Semantic similarity threshold for meaningful results
-const SEMANTIC_SIMILARITY_THRESHOLD: f32 = 0.2;
+const SEMANTIC_SIMILARITY_THRESHOLD: f32 = 0.25;
 
 // Default terminal width for text wrapping
 const DEFAULT_TERMINAL_WIDTH: usize = 80;
 
-const DEFAULT_MAX_RESULTS: usize = 10;
+const DEFAULT_MAX_RESULTS: usize = 7;
 
 #[derive(Debug)]
 pub struct SearchResult {
@@ -58,13 +58,13 @@ pub struct SearchCommandOptions {
     /// Include insights updated on or before a date (YYYY-MM-DD, RFC3339, or relative like 7d)
     #[arg(long)]
     pub until: Option<String>,
-    /// Maximum number of results to return (default: 10, -1 for unlimited)
+    /// Maximum number of results to return (default: 7, -1 for unlimited)
     #[arg(
         short = 'n',
         long,
         alias = "max",
         short_alias = 'm',
-        default_value = "10"
+        default_value = "7"
     )]
     pub max_results: i32,
 }
