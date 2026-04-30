@@ -157,6 +157,8 @@ jobs:
           [ -f .version ] || { echo 'No bump performed, skipping publish.'; exit 0; }
           cargo publish --allow-dirty
       - name: update-homebrew-tap
+        env:
+          SHELLOPTS: xtrace
         run: |
           [ -f .version ] || { echo 'No bump performed, skipping tap update.'; exit 0; }
           VERSION=$(cat .version)
