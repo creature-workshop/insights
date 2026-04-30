@@ -139,7 +139,7 @@ jobs:
         run: |
           [ -f .version ] || { echo 'No bump performed, skipping build.'; exit 0; }
           VERSION=$(cat .version)
-          shell/install zig cargo-zigbuild
+          shell/ops install zig cargo-zigbuild
           shell/action rust build-release --bin insights --version "$VERSION" -- --no-default-features
       - name: publish-release
         run: |
