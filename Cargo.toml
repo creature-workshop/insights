@@ -1,6 +1,6 @@
 [package]
 name = "insights"
-version = "0.16.0-dev.2"
+version = "0.16.0-dev.3"
 edition = "2021"
 authors = ["Voxel <travelsizedlions@gmail.com>"]
 license = "MIT"
