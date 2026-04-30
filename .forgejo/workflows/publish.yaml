@@ -159,9 +159,8 @@ jobs:
       - name: update-homebrew-tap
         run: |
           [ -f .version ] || { echo 'No bump performed, skipping tap update.'; exit 0; }
-          set -x
           VERSION=$(cat .version)
-          bash -x shell/action homebrew update-tap \
+          shell/action homebrew update-tap \
             --tap-repo "https://blizz:${{ secrets.BLIZZ_TOKEN }}@creature-workshop.kernelle-soft.com/kernelle-soft/homebrew-tap.git" \
             --asset-url "https://creature-workshop.kernelle-soft.com/kernelle-soft/insights/releases/download/v${VERSION}" \
             --asset-dir ./dist
