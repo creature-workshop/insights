@@ -124,7 +124,7 @@ jobs:
       - run: shell/action git config "Blizz" "blizz@kernelle-soft.com"
       - run: shell/action git auth "blizz" "${{ secrets.BLIZZ_TOKEN }}"
       - run: shell/action forgejo sync-labels
-      - name: bump-and-release
+      - name: bump-version
         run: |
           VERSION=$(shell/ops git-bump --dry-run) || { echo "No bump needed, skipping release."; exit 0; }
           shell/action git version-guard "v${VERSION}" || exit 0
@@ -134,13 +134,20 @@ jobs:
           shell/scripts/sync_cargo_version.sh "$VERSION"
           shell/ops git-commit -a -m "chore: bump to v${VERSION} [skip ci]"
           git tag -a "v${VERSION}" -m "v${VERSION}"
-          git push origin main "v${VERSION}"
+      - name: install-build-tools
+        run: |
+          [ -f .version ] || { echo 'No bump performed, skipping install.'; exit 0; }
+          shell/ops install zig cargo-zigbuild
       - name: build-release-binaries
         run: |
           [ -f .version ] || { echo 'No bump performed, skipping build.'; exit 0; }
           VERSION=$(cat .version)
-          shell/ops install zig cargo-zigbuild
           shell/action rust build-release --bin insights --version "$VERSION" -- --no-default-features
+      - name: push-version
+        run: |
+          [ -f .version ] || { echo 'No bump performed, skipping push.'; exit 0; }
+          VERSION=$(cat .version)
+          git push origin main "v${VERSION}"
       - name: publish-release
         run: |
           [ -f .version ] || { echo 'No bump performed, skipping release.'; exit 0; }
