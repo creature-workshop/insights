@@ -4,6 +4,9 @@
     "build-essential": { "version": "" }
   },
   "script": {
+    "llvm-strip": {
+      "version": "14"
+    },
     "zig": {
       "version": "0.16.0",
       "needs": ["build-essential"]

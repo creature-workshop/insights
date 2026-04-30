@@ -137,7 +137,7 @@ jobs:
       - name: install-build-tools
         run: |
           [ -f .version ] || { echo 'No bump performed, skipping install.'; exit 0; }
-          shell/ops install zig cargo-zigbuild
+          shell/ops install llvm-strip zig cargo-zigbuild
       - name: build-release-binaries
         run: |
           [ -f .version ] || { echo 'No bump performed, skipping build.'; exit 0; }
