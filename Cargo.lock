@@ -773,9 +773,9 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "bentley"
-version = "0.13.0"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d089cf9775027964fa0351f0f5fe716b9d367b94ca023015dbed7e5128789c83"
+checksum = "3bb0eca7f52bc5fbcac103a43914b2d695599bbb528d990128daa98422895de2"
 dependencies = [
  "chrono",
  "colored",
