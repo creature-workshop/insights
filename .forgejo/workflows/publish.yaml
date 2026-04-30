@@ -114,6 +114,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/bin
+            ~/.zig
             target
           key: rust-${{ hashFiles('Cargo.lock', 'ops.lock') }}
           restore-keys: |
@@ -134,12 +135,26 @@ jobs:
           shell/ops git-commit -a -m "chore: bump to v${VERSION} [skip ci]"
           git tag -a "v${VERSION}" -m "v${VERSION}"
           git push origin main "v${VERSION}"
+      - name: build-release-binaries
+        run: |
+          [ -f .version ] || { echo 'No bump performed, skipping build.'; exit 0; }
+          VERSION=$(cat .version)
+          shell/install zig cargo-zigbuild
+          shell/action rust build-release --bin insights --version "$VERSION" -- --no-default-features
       - name: publish-release
         run: |
           [ -f .version ] || { echo 'No bump performed, skipping release.'; exit 0; }
-          shell/ops publish-release
+          shell/ops publish-release --artifacts ./dist/artifacts.json
       - name: publish-crate
         run: |
           [ -f .version ] || { echo 'No bump performed, skipping publish.'; exit 0; }
           cargo publish
+      - name: update-homebrew-tap
+        run: |
+          [ -f .version ] || { echo 'No bump performed, skipping tap update.'; exit 0; }
+          VERSION=$(cat .version)
+          shell/action homebrew update-tap \
+            --tap-repo "https://blizz:${{ secrets.BLIZZ_TOKEN }}@creature-workshop.kernelle-soft.com/kernelle-soft/homebrew-tap.git" \
+            --asset-url "https://creature-workshop.kernelle-soft.com/kernelle-soft/insights/releases/download/v${VERSION}" \
+            --asset-dir ./dist
       - run: shell/action linear close-mentioned-issues

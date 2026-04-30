@@ -1,6 +1,19 @@
 {
   "system": {
-    "shellcheck": { "version": "0.9.0" }
+    "shellcheck": { "version": "0.9.0" },
+    "build-essential": { "version": "" }
+  },
+  "script": {
+    "zig": {
+      "version": "0.16.0",
+      "needs": ["build-essential"]
+    }
+  },
+  "cargo-install": {
+    "cargo-zigbuild": {
+      "version": "0.22.1",
+      "needs": ["rustup"]
+    }
   },
   "cargo-binstall": {
     "cargo-audit": {
