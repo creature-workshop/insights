@@ -165,5 +165,7 @@ jobs:
           shell/action homebrew update-tap \
             --tap-repo "https://blizz:${{ secrets.BLIZZ_TOKEN }}@creature-workshop.kernelle-soft.com/kernelle-soft/homebrew-tap.git" \
             --asset-url "https://creature-workshop.kernelle-soft.com/kernelle-soft/insights/releases/download/v${VERSION}" \
-            --asset-dir ./dist
+            --asset-dir ./dist \
+            --description "Knowledge management and insight storage system" \
+            --version "$VERSION"
       - run: shell/action linear close-mentioned-issues
