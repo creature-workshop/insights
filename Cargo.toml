@@ -38,7 +38,7 @@ path = "src/bin/insights_server.rs"
 [dependencies]
 clap = { version = "4.5", features = ["derive", "env"] }
 dirs = "6.0"
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "0.4", default-features = false, features = ["now", "serde", "std"] }
 anyhow = "1.0"
 colored = "3.0"
 tracing = "0.1"
