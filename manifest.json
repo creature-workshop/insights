@@ -1,7 +1,7 @@
 {
   "name": "insights",
   "command-name": "insights",
-  "description": "Knowledge management and insight storage system",
+  "description": "A drop-in, IDE-agnostic AI knowledge management and retrieval system",
   "org": "kernelle-soft",
   "linear-team": "OPS",
   "repo": "insights",
