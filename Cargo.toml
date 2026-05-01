@@ -62,7 +62,7 @@ schemars = { version = "1.2", features = ["uuid1", "chrono04"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 
-reqwest = { version = "0.12.23", default-features = false, features = [
+reqwest = { version = "0.13.0", default-features = false, features = [
   "json",
   "rustls-tls",
 ] }
