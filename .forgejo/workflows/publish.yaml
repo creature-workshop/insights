@@ -131,7 +131,7 @@ jobs:
           echo "$VERSION" > .version
 
           shell/ops sync-manifest "$VERSION"
-          shell/scripts/sync_cargo_version.sh "$VERSION"
+          shell/action rust sync-cargo-version "$VERSION"
           shell/ops git-commit -a -m "chore: bump to v${VERSION} [skip ci]"
           git tag -a "v${VERSION}" -m "v${VERSION}"
       - name: install-build-tools
