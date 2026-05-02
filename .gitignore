@@ -5,3 +5,6 @@ shell/ops
 
 # Derived from shellops submodule
 shell/action
+
+# Derived from shellops submodule
+/.version
