@@ -126,7 +126,11 @@ jobs:
       - run: shell/action forgejo sync-labels
       - name: bump-version
         run: |
-          VERSION=$(shell/ops git-bump --dry-run) || { echo "No bump needed, skipping release."; exit 0; }
+          BUMP_FLAG=""
+          if [[ "${{ inputs.bump || 'auto' }}" != "auto" ]]; then
+            BUMP_FLAG="--${{ inputs.bump }}"
+          fi
+          VERSION=$(shell/ops git-bump --dry-run $BUMP_FLAG) || { echo "No bump needed, skipping release."; exit 0; }
           shell/action git version-guard "v${VERSION}" || exit 0
           echo "$VERSION" > .version
 
