@@ -3034,7 +3034,7 @@ dependencies = [
 
 [[package]]
 name = "insights"
-version = "0.16.0-dev.12"
+version = "0.16.0"
 dependencies = [
  "anyhow",
  "arrow 58.2.0",
