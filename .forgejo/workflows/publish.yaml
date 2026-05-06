@@ -146,7 +146,11 @@ jobs:
         run: |
           [ -f .version ] || { echo 'No bump performed, skipping build.'; exit 0; }
           VERSION=$(cat .version)
-          shell/action rust build-release --bin insights --version "$VERSION" -- --no-default-features
+          shell/action rust build-release \
+            --bin insights \
+            --bin insights_server \
+            --version "$VERSION" \
+            -- --no-default-features
       - name: push-version
         run: |
           [ -f .version ] || { echo 'No bump performed, skipping push.'; exit 0; }
