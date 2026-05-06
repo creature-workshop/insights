@@ -12,6 +12,7 @@ categories = ["command-line-utilities", "development-tools"]
 exclude = [
   "shell/",
   ".forgejo/",
+  "dist/",
   ".envrc",
   "lefthook.yml",
   "manifest.json",
