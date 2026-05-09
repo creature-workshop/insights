@@ -1006,6 +1006,8 @@ pub async fn search_insights(
     let should_finalize =
         add_embedding_search_results(&context, &request, &search_options, &mut all_results).await;
 
+    apply_exclusion_filter(&mut all_results, &search_options);
+
     if should_finalize {
         Ok(ResponseJson(
             finalize_search_results(
@@ -1050,6 +1052,42 @@ fn build_search_options(
     request: &SearchRequest,
 ) -> Result<crate::server::services::search::SearchOptions> {
     crate::server::services::search::SearchOptions::from_request(request)
+}
+
+/// Remove results that match any exclusion term (handles embedding results
+/// that bypass the per-insight filter in the term search path).
+fn apply_exclusion_filter(
+    results: &mut Vec<SearchResultData>,
+    options: &crate::server::services::search::SearchOptions,
+) {
+    if options.exclude.is_empty() {
+        return;
+    }
+
+    results.retain(|result| {
+        let content = if options.overview_only {
+            format!("{} {} {}", result.topic, result.name, result.overview)
+        } else {
+            format!(
+                "{} {} {} {}",
+                result.topic, result.name, result.overview, result.details
+            )
+        };
+        let content = if options.case_sensitive {
+            content
+        } else {
+            content.to_lowercase()
+        };
+
+        !options.exclude.iter().any(|term| {
+            let normalized = if options.case_sensitive {
+                term.to_string()
+            } else {
+                term.to_lowercase()
+            };
+            content.contains(&normalized)
+        })
+    });
 }
 
 /// Perform term-based search and return results

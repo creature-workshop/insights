@@ -67,6 +67,9 @@ pub struct SearchCommandOptions {
         default_value = "7"
     )]
     pub max_results: i32,
+    /// Exclude results containing these terms (repeatable)
+    #[arg(short = 'x', long = "exclude", num_args = 1)]
+    pub exclude: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -81,6 +84,7 @@ pub struct SearchOptions {
     pub until: Option<DateTime<Utc>>,
     /// None = no limit, Some(n) = limit to n results
     pub max_results: Option<usize>,
+    pub exclude: Vec<String>,
 }
 
 impl SearchOptions {
@@ -96,6 +100,7 @@ impl SearchOptions {
             since: options.since.clone(),
             until: options.until.clone(),
             max_results: Some(options.max_results),
+            exclude: options.exclude.clone(),
         };
 
         Self::from_request(&request)
@@ -121,6 +126,7 @@ impl SearchOptions {
                 .map(|value| parse_until_date_filter(value, now))
                 .transpose()?,
             max_results: parse_max_results(request.max_results),
+            exclude: request.exclude.clone(),
         })
     }
 }
@@ -137,6 +143,7 @@ impl Default for SearchOptions {
             since: None,
             until: None,
             max_results: Some(DEFAULT_MAX_RESULTS),
+            exclude: Vec::new(),
         }
     }
 }
@@ -234,6 +241,29 @@ pub fn matches_date_range(insight: &insight::Insight, options: &SearchOptions) -
     }
 
     true
+}
+
+/// Returns true if the insight matches any exclusion term (and should be filtered out).
+pub fn matches_exclusion(insight: &insight::Insight, options: &SearchOptions) -> bool {
+    if options.exclude.is_empty() {
+        return false;
+    }
+
+    let content = get_normalized_content(insight, options);
+    let content = if options.case_sensitive {
+        content
+    } else {
+        content.to_lowercase()
+    };
+
+    options.exclude.iter().any(|term| {
+        let normalized = if options.case_sensitive {
+            term.to_string()
+        } else {
+            term.to_lowercase()
+        };
+        content.contains(&normalized)
+    })
 }
 
 fn sort_by_relevance(results: &mut [SearchResult]) {
@@ -342,6 +372,10 @@ fn search_insight(
     options: &SearchOptions,
 ) -> Result<Option<SearchResult>> {
     if !matches_date_range(insight, options) {
+        return Ok(None);
+    }
+
+    if matches_exclusion(insight, options) {
         return Ok(None);
     }
 
@@ -576,6 +610,7 @@ mod tests {
             since: Some("7d".to_string()),
             until: None,
             max_results: 10,
+            exclude: vec!["ignored".to_string()],
         };
 
         let options = SearchOptions::from_command_options(&cmd_options).unwrap();

@@ -7,3 +7,8 @@ pre-commit:
     clippy:
       glob: "*.rs"
       run: cargo clippy -- -D warnings
+
+pre-push:
+  commands:
+    coverage:
+      run: cargo tarpaulin --config tarpaulin.toml --skip-clean

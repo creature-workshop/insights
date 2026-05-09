@@ -8,3 +8,4 @@ shell/action
 
 # Derived from shellops submodule
 /.version
+coverage

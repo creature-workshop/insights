@@ -871,4 +871,185 @@ This insight was created before temporal metadata was added.
 
         Ok(())
     }
+
+    #[test]
+    #[serial]
+    fn test_search_exclude_filters_matching_results() -> Result<()> {
+        let _temp = setup_temp_insights_root("search_exclude_basic");
+
+        let insight1 = Insight::new(
+            "lang".to_string(),
+            "rust_guide".to_string(),
+            "Rust programming guide".to_string(),
+            "Rust is a systems language with zero-cost abstractions".to_string(),
+        );
+        let insight2 = Insight::new(
+            "lang".to_string(),
+            "python_guide".to_string(),
+            "Python programming guide".to_string(),
+            "Python is great for scripting and rapid prototyping".to_string(),
+        );
+
+        insight::save(&insight1)?;
+        insight::save(&insight2)?;
+
+        let results = search::search(
+            &["programming".to_string()],
+            &search::SearchOptions {
+                exact: true,
+                exclude: vec!["python".to_string()],
+                ..search::SearchOptions::default()
+            },
+        )?;
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "rust_guide");
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_search_exclude_multiple_terms() -> Result<()> {
+        let _temp = setup_temp_insights_root("search_exclude_multi");
+
+        let insight1 = Insight::new(
+            "tools".to_string(),
+            "docker_setup".to_string(),
+            "Docker container setup".to_string(),
+            "How to configure Docker containers for development".to_string(),
+        );
+        let insight2 = Insight::new(
+            "tools".to_string(),
+            "k8s_deploy".to_string(),
+            "Kubernetes deployment guide".to_string(),
+            "Deploy apps to Kubernetes clusters".to_string(),
+        );
+        let insight3 = Insight::new(
+            "tools".to_string(),
+            "ci_pipeline".to_string(),
+            "CI pipeline configuration".to_string(),
+            "Setting up continuous integration pipelines".to_string(),
+        );
+
+        insight::save(&insight1)?;
+        insight::save(&insight2)?;
+        insight::save(&insight3)?;
+
+        let results = search::search(
+            &["tools".to_string()],
+            &search::SearchOptions {
+                exact: true,
+                exclude: vec!["docker".to_string(), "kubernetes".to_string()],
+                ..search::SearchOptions::default()
+            },
+        )?;
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "ci_pipeline");
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_search_exclude_is_case_insensitive_by_default() -> Result<()> {
+        let _temp = setup_temp_insights_root("search_exclude_case");
+
+        let insight1 = Insight::new(
+            "lang".to_string(),
+            "rust_async".to_string(),
+            "Async Rust patterns".to_string(),
+            "Using tokio for ASYNC runtime in Rust".to_string(),
+        );
+        let insight2 = Insight::new(
+            "lang".to_string(),
+            "rust_sync".to_string(),
+            "Synchronous Rust patterns".to_string(),
+            "Blocking IO patterns in Rust".to_string(),
+        );
+
+        insight::save(&insight1)?;
+        insight::save(&insight2)?;
+
+        let results = search::search(
+            &["rust".to_string()],
+            &search::SearchOptions {
+                exact: true,
+                exclude: vec!["ASYNC".to_string()],
+                ..search::SearchOptions::default()
+            },
+        )?;
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "rust_sync");
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_search_exclude_respects_case_sensitive_flag() -> Result<()> {
+        let _temp = setup_temp_insights_root("search_exclude_case_sensitive");
+
+        let insight1 = Insight::new(
+            "lang".to_string(),
+            "rust_async".to_string(),
+            "Async Rust patterns".to_string(),
+            "Using tokio for async runtime in Rust".to_string(),
+        );
+        let insight2 = Insight::new(
+            "lang".to_string(),
+            "rust_sync".to_string(),
+            "Synchronous Rust patterns".to_string(),
+            "Blocking IO patterns in Rust".to_string(),
+        );
+
+        insight::save(&insight1)?;
+        insight::save(&insight2)?;
+
+        // Excluding "ASYNC" with case_sensitive=true should NOT exclude the
+        // insight that contains lowercase "async"
+        let results = search::search(
+            &["Rust".to_string()],
+            &search::SearchOptions {
+                exact: true,
+                case_sensitive: true,
+                exclude: vec!["ASYNC".to_string()],
+                ..search::SearchOptions::default()
+            },
+        )?;
+
+        assert_eq!(results.len(), 2);
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_search_exclude_with_no_positive_matches() -> Result<()> {
+        let _temp = setup_temp_insights_root("search_exclude_no_match");
+
+        let insight1 = Insight::new(
+            "misc".to_string(),
+            "something".to_string(),
+            "Unrelated content".to_string(),
+            "Nothing interesting here".to_string(),
+        );
+
+        insight::save(&insight1)?;
+
+        let results = search::search(
+            &["nonexistent_term".to_string()],
+            &search::SearchOptions {
+                exact: true,
+                exclude: vec!["something".to_string()],
+                ..search::SearchOptions::default()
+            },
+        )?;
+
+        assert!(results.is_empty());
+
+        Ok(())
+    }
 }

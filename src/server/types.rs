@@ -328,6 +328,10 @@ pub struct SearchRequest {
     /// Maximum number of results to return (-1 for unlimited, default server behavior if omitted)
     #[serde(default)]
     pub max_results: Option<i32>,
+
+    /// Terms to exclude from results (exact substring match)
+    #[serde(default)]
+    pub exclude: Vec<String>,
 }
 
 /// Search result data
@@ -541,6 +545,7 @@ mod tests {
             since: None,
             until: None,
             max_results: None,
+            exclude: Vec::new(),
         };
 
         // These should all be false by default due to #[serde(default)]

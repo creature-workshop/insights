@@ -428,6 +428,7 @@ pub async fn search_insights(terms: &[String], options: SearchCommandOptions) ->
         since: options.since,
         until: options.until,
         max_results: Some(options.max_results),
+        exclude: options.exclude,
     };
     let response = client.search_insights(request).await?;
 
