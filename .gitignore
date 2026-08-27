@@ -8,4 +8,7 @@ shell/action
 
 # Derived from shellops submodule
 /.version
+
+# Derived from shellops submodule
+/.opcache
 coverage
