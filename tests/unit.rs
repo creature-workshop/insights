@@ -8,10 +8,13 @@ mod insight_tests {
     use std::env;
     use tempfile::TempDir;
 
+    /// Points the store and this machine's usage counters at a fresh temp
+    /// directory, so a test run never reads or writes the operator's insights.
     fn setup_temp_insights_root(test_name: &str) -> TempDir {
         let temp_dir = TempDir::new().unwrap();
         let _unique_var = format!("INSIGHTS_ROOT_{}", test_name.to_uppercase());
         env::set_var("INSIGHTS_ROOT", temp_dir.path());
+        env::set_var("INSIGHTS_USAGE_PATH", temp_dir.path().join("usage.json"));
         temp_dir
     }
 
@@ -1049,6 +1052,338 @@ This insight was created before temporal metadata was added.
         )?;
 
         assert!(results.is_empty());
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod usage_tests {
+    use anyhow::Result;
+    use insights::server::models::insight::{self, Insight};
+    use insights::server::models::usage::{self, AccessType};
+    use serial_test::serial;
+    use std::env;
+    use std::fs;
+    use tempfile::TempDir;
+
+    /// Points the store and this machine's usage counters at a fresh temp
+    /// directory, so a test run never reads or writes the operator's insights.
+    fn setup_temp_insights_root() -> TempDir {
+        let temp_dir = TempDir::new().unwrap();
+        env::set_var("INSIGHTS_ROOT", temp_dir.path());
+        env::set_var("INSIGHTS_USAGE_PATH", temp_dir.path().join("usage.json"));
+        temp_dir
+    }
+
+    fn save_insight(topic: &str, name: &str) -> Result<()> {
+        insight::save(&Insight::new(
+            topic.to_string(),
+            name.to_string(),
+            "An overview".to_string(),
+            "Some details".to_string(),
+        ))
+    }
+
+    /// Writes an insight file in the pre-usage-store format, with the counters
+    /// still in its trailing metadata block.
+    fn write_legacy_insight(root: &std::path::Path, topic: &str, name: &str) -> Result<()> {
+        let topic_dir = root.join(topic);
+        fs::create_dir_all(&topic_dir)?;
+        fs::write(
+            topic_dir.join(format!("{name}.insight.md")),
+            format!(
+                "---\ntopic: {topic}\nname: {name}\noverview: An overview\n---\n\n\
+                 # Details\nSome details\n\n---\nmetadata:\n  \
+                 created_at: 2026-01-15T10:30:00Z\n  \
+                 last_updated: 2026-01-20T14:45:00Z\n  \
+                 update_count: 2\n  \
+                 retrieval_count: 7\n  \
+                 search_hit_count: 11\n  \
+                 last_accessed: 2026-02-01T09:00:00Z\n  \
+                 pinned: true\n"
+            ),
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_get_reports_zeroes_for_an_untouched_insight() {
+        let _temp = setup_temp_insights_root();
+
+        let usage = usage::get("never", "touched");
+
+        assert_eq!(usage.retrieval_count, 0);
+        assert_eq!(usage.search_hit_count, 0);
+        assert_eq!(usage.last_accessed, None);
+    }
+
+    #[test]
+    #[serial]
+    fn test_record_counts_retrievals_and_search_hits_separately() -> Result<()> {
+        let _temp = setup_temp_insights_root();
+
+        usage::record("rust", "async-patterns", AccessType::Retrieval)?;
+
+        let usage = usage::get("rust", "async-patterns");
+        assert_eq!(usage.retrieval_count, 1);
+        assert_eq!(usage.search_hit_count, 0);
+        assert!(usage.last_accessed.is_some());
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_record_counts_every_access() -> Result<()> {
+        let _temp = setup_temp_insights_root();
+
+        usage::record("rust", "async-patterns", AccessType::Retrieval)?;
+        usage::record("rust", "async-patterns", AccessType::Retrieval)?;
+        usage::record("rust", "async-patterns", AccessType::SearchHit)?;
+
+        let usage = usage::get("rust", "async-patterns");
+        assert_eq!(usage.retrieval_count, 2);
+        assert_eq!(usage.search_hit_count, 1);
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_record_many_counts_every_insight_it_is_given() -> Result<()> {
+        let _temp = setup_temp_insights_root();
+
+        usage::record_many(
+            &[
+                ("rust".to_string(), "first".to_string()),
+                ("rust".to_string(), "second".to_string()),
+            ],
+            AccessType::SearchHit,
+        )?;
+
+        assert_eq!(usage::get("rust", "first").search_hit_count, 1);
+        assert_eq!(usage::get("rust", "second").search_hit_count, 1);
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_counters_are_keyed_case_insensitively() -> Result<()> {
+        let _temp = setup_temp_insights_root();
+
+        usage::record("Rust", "Async-Patterns", AccessType::Retrieval)?;
+
+        assert_eq!(usage::get("rust", "async-patterns").retrieval_count, 1);
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_attaches_this_machines_counters_to_the_insight() -> Result<()> {
+        let _temp = setup_temp_insights_root();
+        save_insight("rust", "async-patterns")?;
+
+        usage::record("rust", "async-patterns", AccessType::Retrieval)?;
+        let loaded = insight::load("rust", "async-patterns")?;
+
+        assert_eq!(loaded.retrieval_count, 1);
+        assert!(loaded.last_accessed.is_some());
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_saving_an_insight_writes_no_counters_into_its_file() -> Result<()> {
+        let temp = setup_temp_insights_root();
+        save_insight("rust", "async-patterns")?;
+
+        let contents =
+            fs::read_to_string(temp.path().join("rust").join("async-patterns.insight.md"))?;
+
+        assert!(!contents.contains("retrieval_count"));
+        assert!(!contents.contains("search_hit_count"));
+        assert!(!contents.contains("last_accessed"));
+        assert!(contents.contains("update_count"));
+        assert!(contents.contains("pinned"));
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_reading_an_insight_leaves_its_file_byte_identical() -> Result<()> {
+        let temp = setup_temp_insights_root();
+        save_insight("rust", "async-patterns")?;
+
+        let path = temp.path().join("rust").join("async-patterns.insight.md");
+        let before = fs::read(&path)?;
+
+        insight::load("rust", "async-patterns")?;
+        usage::record("rust", "async-patterns", AccessType::Retrieval)?;
+        usage::record_many(
+            &[("rust".to_string(), "async-patterns".to_string())],
+            AccessType::SearchHit,
+        )?;
+
+        assert_eq!(before, fs::read(&path)?);
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_migration_moves_footer_counters_into_the_usage_store() -> Result<()> {
+        let temp = setup_temp_insights_root();
+        write_legacy_insight(temp.path(), "rust", "legacy")?;
+
+        insight::migrate_usage_footers()?;
+
+        let usage = usage::get("rust", "legacy");
+        assert_eq!(usage.retrieval_count, 7);
+        assert_eq!(usage.search_hit_count, 11);
+        assert!(usage.last_accessed.is_some());
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_migration_strips_counters_from_the_file_but_keeps_the_insight() -> Result<()> {
+        let temp = setup_temp_insights_root();
+        write_legacy_insight(temp.path(), "rust", "legacy")?;
+
+        insight::migrate_usage_footers()?;
+
+        let contents = fs::read_to_string(temp.path().join("rust").join("legacy.insight.md"))?;
+        assert!(!contents.contains("retrieval_count"));
+        assert!(!contents.contains("search_hit_count"));
+
+        let loaded = insight::load("rust", "legacy")?;
+        assert_eq!(loaded.overview, "An overview");
+        assert_eq!(loaded.details, "Some details");
+        assert_eq!(loaded.update_count, 2);
+        assert!(loaded.pinned);
+        assert_eq!(loaded.retrieval_count, 7);
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_migration_leaves_an_already_migrated_store_untouched() -> Result<()> {
+        let temp = setup_temp_insights_root();
+        write_legacy_insight(temp.path(), "rust", "legacy")?;
+
+        insight::migrate_usage_footers()?;
+
+        let path = temp.path().join("rust").join("legacy.insight.md");
+        let after_first = fs::read(&path)?;
+        usage::record("rust", "legacy", AccessType::Retrieval)?;
+
+        insight::migrate_usage_footers()?;
+
+        // The rerun neither rewrites the file nor puts the migrated 7 back over
+        // the retrieval recorded since.
+        assert_eq!(after_first, fs::read(&path)?);
+        assert_eq!(usage::get("rust", "legacy").retrieval_count, 8);
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_migration_leaves_a_file_without_counters_byte_identical() -> Result<()> {
+        let temp = setup_temp_insights_root();
+
+        // The layout insights were written in before counters moved to the
+        // footer: timestamps in the frontmatter, no counters anywhere.
+        let path = temp.path().join("rust").join("older-layout.insight.md");
+        fs::create_dir_all(path.parent().unwrap())?;
+        let original = "---\ntopic: rust\nname: older-layout\noverview: An overview\n                        created_at: 2026-04-05T07:47:15Z\nlast_updated: 2026-04-05T07:47:15Z\n                        update_count: 0\n---\n\n# Details\nSome details";
+        fs::write(&path, original)?;
+
+        insight::migrate_usage_footers()?;
+
+        assert_eq!(fs::read_to_string(&path)?, original);
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_migration_leaves_an_empty_file_alone() -> Result<()> {
+        let temp = setup_temp_insights_root();
+
+        let path = temp.path().join("rust").join("empty.insight.md");
+        fs::create_dir_all(path.parent().unwrap())?;
+        fs::write(&path, "")?;
+
+        insight::migrate_usage_footers()?;
+
+        assert_eq!(fs::read_to_string(&path)?, "");
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_migration_records_nothing_for_files_that_carry_no_counters() -> Result<()> {
+        let _temp = setup_temp_insights_root();
+        save_insight("rust", "fresh")?;
+
+        insight::migrate_usage_footers()?;
+
+        assert_eq!(usage::get("rust", "fresh").retrieval_count, 0);
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_migration_still_moves_counters_when_a_store_already_exists() -> Result<()> {
+        let temp = setup_temp_insights_root();
+
+        // An older build recording into the files again — after a rollback, say
+        // — leaves counters behind that this machine already has a store for.
+        usage::record("rust", "legacy", AccessType::Retrieval)?;
+        write_legacy_insight(temp.path(), "rust", "legacy")?;
+
+        insight::migrate_usage_footers()?;
+
+        let contents = fs::read_to_string(temp.path().join("rust").join("legacy.insight.md"))?;
+        assert!(!contents.contains("retrieval_count"));
+
+        // The file's 7 beats the store's 1, and the file's 11 beats its absent
+        // search hits.
+        let usage = usage::get("rust", "legacy");
+        assert_eq!(usage.retrieval_count, 7);
+        assert_eq!(usage.search_hit_count, 11);
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_adopting_counters_never_lowers_one_the_store_already_holds() -> Result<()> {
+        let temp = setup_temp_insights_root();
+        write_legacy_insight(temp.path(), "rust", "legacy")?;
+
+        for _ in 0..9 {
+            usage::record("rust", "legacy", AccessType::SearchHit)?;
+        }
+
+        insight::migrate_usage_footers()?;
+
+        // The file carries 11 search hits and the store 9; 11 wins. The file's
+        // 7 retrievals arrive against the store's none.
+        let usage = usage::get("rust", "legacy");
+        assert_eq!(usage.search_hit_count, 11);
+        assert_eq!(usage.retrieval_count, 7);
 
         Ok(())
     }

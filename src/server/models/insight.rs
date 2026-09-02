@@ -1,3 +1,4 @@
+use crate::server::models::usage::{self, Usage};
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use dirs::{data_dir, home_dir};
@@ -70,19 +71,26 @@ struct InsightFileFrontMatter {
     overview: String,
 }
 
+/// The metadata block trailing an insight's details.
+///
+/// The usage counters are read but never written: files written before the
+/// usage store existed carry them, and loading such a file is how those counts
+/// reach the store. Everything else here describes the insight itself and is
+/// written on every save.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct InsightTemporalMetadata {
     created_at: DateTime<Utc>,
     last_updated: DateTime<Utc>,
     update_count: u32,
     #[serde(default)]
-    retrieval_count: u32,
-    #[serde(default)]
-    search_hit_count: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    last_accessed: Option<DateTime<Utc>>,
-    #[serde(default)]
     pinned: bool,
+
+    #[serde(default, skip_serializing)]
+    retrieval_count: u32,
+    #[serde(default, skip_serializing)]
+    search_hit_count: u32,
+    #[serde(default, skip_serializing)]
+    last_accessed: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -165,7 +173,16 @@ pub fn save_existing(insight: &Insight) -> Result<()> {
 
 fn write_to_file(insight: &Insight, file_path: &PathBuf) -> Result<()> {
     ensure_parent_dir_exists(file_path)?;
+    fs::write(file_path, render(insight)?)?;
 
+    Ok(())
+}
+
+/// Renders an insight as the contents of its file.
+///
+/// Only the insight itself appears here. This machine's usage counters live in
+/// the usage store, so reading an insight never changes what this returns.
+fn render(insight: &Insight) -> Result<String> {
     let frontmatter = InsightFileFrontMatter {
         topic: insight.topic.clone(),
         name: insight.name.clone(),
@@ -185,13 +202,11 @@ fn write_to_file(insight: &Insight, file_path: &PathBuf) -> Result<()> {
 
     let yaml_content = serde_yaml::to_string(&frontmatter)?;
     let metadata_content = serde_yaml::to_string(&temporal_metadata)?;
-    let content = format!(
+
+    Ok(format!(
         "---\n{}---\n\n# Details\n{}\n\n---\n{}",
         yaml_content, insight.details, metadata_content
-    );
-    fs::write(file_path, content)?;
-
-    Ok(())
+    ))
 }
 
 pub fn load(topic: &str, name: &str) -> Result<Insight> {
@@ -202,21 +217,43 @@ pub fn load(topic: &str, name: &str) -> Result<Insight> {
     }
 
     let content = fs::read_to_string(&file_path)?;
-    parse_insight_from_content(topic, name, &content)
+    let mut insight = parse_insight_from_content(topic, name, &content)?;
+    attach_usage(&mut insight);
+
+    Ok(insight)
 }
 
 pub fn load_from_path(path: &std::path::Path) -> Result<Insight> {
+    let mut insight = parse_file(path)?;
+    attach_usage(&mut insight);
+
+    Ok(insight)
+}
+
+/// Reads an insight file without consulting this machine's usage store, so the
+/// counters are whatever the file itself carries.
+///
+/// The migration uses this to find counts left in files written before the
+/// usage store existed; every other caller wants `load_from_path`.
+fn parse_file(path: &std::path::Path) -> Result<Insight> {
     let content = fs::read_to_string(path)?;
-    parse_insight_from_content(
-        path.parent()
-            .unwrap()
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap(),
-        path.file_stem().unwrap().to_str().unwrap(),
-        &content,
-    )
+    let topic = path
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .and_then(|topic| topic.to_str())
+        .unwrap_or("unknown");
+    let name = extract_insight_name(path)
+        .ok_or_else(|| anyhow!("Not an insight file: {}", path.display()))?;
+
+    parse_insight_from_content(topic, &name, &content)
+}
+
+/// Replaces an insight's usage counters with what this machine has recorded.
+pub fn attach_usage(insight: &mut Insight) {
+    let usage = usage::get(&insight.topic, &insight.name);
+    insight.retrieval_count = usage.retrieval_count;
+    insight.search_hit_count = usage.search_hit_count;
+    insight.last_accessed = usage.last_accessed;
 }
 
 pub fn update(
@@ -268,34 +305,6 @@ pub fn update(
     write_to_file(insight, &new_file_path)?;
 
     Ok(())
-}
-
-const ACCESS_DEBOUNCE_MINUTES: i64 = 5;
-
-#[derive(Debug, Clone, Copy)]
-pub enum AccessType {
-    Retrieval,
-    SearchHit,
-}
-
-pub fn record_access(insight: &mut Insight, access_type: AccessType) -> Result<()> {
-    let now = Utc::now();
-
-    if let Some(last) = insight.last_accessed {
-        let elapsed = now.signed_duration_since(last);
-        if elapsed.num_minutes() < ACCESS_DEBOUNCE_MINUTES {
-            return Ok(());
-        }
-    }
-
-    match access_type {
-        AccessType::Retrieval => insight.retrieval_count += 1,
-        AccessType::SearchHit => insight.search_hit_count += 1,
-    }
-    insight.last_accessed = Some(now);
-
-    let file_path = file_path(insight)?;
-    write_to_file(insight, &file_path)
 }
 
 pub fn pin(insight: &mut Insight) -> Result<()> {
@@ -482,6 +491,99 @@ fn clean_body_content(body: &str) -> String {
         .join("\n")
         .trim()
         .to_string()
+}
+
+/// Moves usage counters out of insight files and into this machine's usage
+/// store.
+///
+/// The server calls this on start, every start. Having a usage store does not
+/// mean the files are clean: run an older build against the same store and it
+/// writes counters back into them, so the only reliable question is whether a
+/// file still holds counters right now.
+///
+/// Only files that keep a metadata footer are rewritten. Insights recorded in
+/// older layouts are left exactly as they are, so a first sync shows the
+/// counters leaving and nothing else.
+pub fn migrate_usage_footers() -> Result<()> {
+    let mut found = Vec::new();
+
+    for path in insight_file_paths()? {
+        migrate_file(&path, &mut found)?;
+    }
+
+    usage::adopt_counts(found)
+}
+
+/// Takes one file's usage counters into `found` and rewrites it without them.
+///
+/// A file that keeps no metadata footer is left untouched: the counters were
+/// only ever written there, and rewriting such a file would have to invent the
+/// timestamps it never recorded.
+fn migrate_file(path: &std::path::Path, found: &mut Vec<(String, String, Usage)>) -> Result<()> {
+    let content = fs::read_to_string(path)?;
+    if !has_metadata_footer(&content) {
+        return Ok(());
+    }
+
+    let insight = parse_file(path)?;
+    if carries_usage(&insight) {
+        found.push((
+            insight.topic.clone(),
+            insight.name.clone(),
+            Usage {
+                retrieval_count: insight.retrieval_count,
+                search_hit_count: insight.search_hit_count,
+                last_accessed: insight.last_accessed,
+            },
+        ));
+    }
+
+    rewrite_if_changed(path, &insight)
+}
+
+/// Prints true when the file keeps its metadata in a trailing block, which is
+/// the only place usage counters were ever written.
+fn has_metadata_footer(content: &str) -> bool {
+    match split_frontmatter_content(content) {
+        Ok((_, body)) => split_trailing_metadata(body).1.is_some(),
+        Err(_) => false,
+    }
+}
+
+/// Prints true when the file this insight came from recorded any usage of it.
+fn carries_usage(insight: &Insight) -> bool {
+    insight.retrieval_count > 0 || insight.search_hit_count > 0 || insight.last_accessed.is_some()
+}
+
+/// Writes the insight back only when rendering it differs from the file on
+/// disk, so re-running over an already-current store touches nothing.
+fn rewrite_if_changed(path: &std::path::Path, insight: &Insight) -> Result<()> {
+    let rendered = render(insight)?;
+    if fs::read_to_string(path)? == rendered {
+        return Ok(());
+    }
+
+    fs::write(path, rendered)?;
+    Ok(())
+}
+
+/// Prints the path of every insight file in the store, across all topics.
+fn insight_file_paths() -> Result<Vec<PathBuf>> {
+    let mut paths = Vec::new();
+
+    for topic_path in get_search_paths(None)? {
+        if !topic_path.exists() {
+            continue;
+        }
+        for entry in fs::read_dir(&topic_path)? {
+            let path = entry?.path();
+            if is_insight_file(&path) {
+                paths.push(path);
+            }
+        }
+    }
+
+    Ok(paths)
 }
 
 pub fn get_topics() -> Result<Vec<String>> {
