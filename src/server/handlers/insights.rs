@@ -18,7 +18,8 @@ use crate::server::types::{
 };
 use crate::server::{
     middleware::RequestContext,
-    models::insight::{self, AccessType},
+    models::insight,
+    models::usage::{self, AccessType},
 };
 
 /// PUT /insights/update - Update an existing insight
@@ -918,7 +919,7 @@ pub async fn get_insight(
 
     match insight::load(&request.topic, &request.name) {
         Ok(mut insight_data) => {
-            if let Err(e) = insight::record_access(&mut insight_data, AccessType::Retrieval) {
+            if let Err(e) = usage::record(&request.topic, &request.name, AccessType::Retrieval) {
                 context
                     .log_warn(
                         &format!(
@@ -929,6 +930,9 @@ pub async fn get_insight(
                     )
                     .await;
             }
+
+            // Report the counts including the retrieval just recorded.
+            insight::attach_usage(&mut insight_data);
 
             context
                 .log_success(
@@ -1286,17 +1290,17 @@ enum EmbeddingAvailability {
     Error,
 }
 
-/// Spawn fire-and-forget tasks to record search hit access for each result
+/// Credit every result with a search hit, without making the searcher wait for
+/// the write.
 fn spawn_search_hit_tracking(results: &[SearchResultData]) {
-    for result in results {
-        let topic = result.topic.clone();
-        let name = result.name.clone();
-        tokio::spawn(async move {
-            if let Ok(mut insight_data) = insight::load(&topic, &name) {
-                let _ = insight::record_access(&mut insight_data, AccessType::SearchHit);
-            }
-        });
-    }
+    let hits: Vec<(String, String)> = results
+        .iter()
+        .map(|result| (result.topic.clone(), result.name.clone()))
+        .collect();
+
+    tokio::spawn(async move {
+        let _ = usage::record_many(&hits, AccessType::SearchHit);
+    });
 }
 
 /// Sort, deduplicate, and create final response

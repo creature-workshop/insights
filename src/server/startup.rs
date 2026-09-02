@@ -10,6 +10,7 @@ use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
 use crate::server::{
     middleware::{self, init_global_logger},
+    models::insight,
     routing::create_router,
 };
 
@@ -36,6 +37,17 @@ pub async fn start_server(addr: SocketAddr) -> Result<()> {
         .unwrap_or(middleware::LogLevel::Info);
 
     middleware::set_log_level(log_level);
+
+    // Insight files written before the usage store carry counters that belong
+    // to this machine; move them before anything serves a read.
+    if let Err(e) = insight::migrate_usage_footers() {
+        daemon_logs
+            .warn(
+                &format!("Failed to migrate usage counters out of insight files: {e}"),
+                "insights-server",
+            )
+            .await;
+    }
 
     // Initialize vector database service (only with ml-features)
     #[cfg(feature = "ml-features")]
