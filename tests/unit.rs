@@ -1388,3 +1388,394 @@ mod usage_tests {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod sync_tests {
+    use anyhow::Result;
+    use insights::server::models::insight::{self, Insight};
+    use insights::sync;
+    use serial_test::serial;
+    use std::env;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    /// Points the store and this machine's usage counters at `dir`.
+    fn use_store(dir: &Path) {
+        env::set_var("INSIGHTS_ROOT", dir);
+        env::set_var("INSIGHTS_USAGE_PATH", dir.join("usage.json"));
+    }
+
+    /// A git command aimed at `dir` and nothing else.
+    ///
+    /// `-C` alone is not enough: git exports GIT_DIR and GIT_WORK_TREE to the
+    /// hooks it runs, they override `-C`, and a test suite running inside a
+    /// pre-push hook would otherwise operate on the repository being pushed.
+    fn git_command(dir: &Path) -> Command {
+        let mut command = Command::new("git");
+        command.arg("-C").arg(dir);
+
+        for key in [
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_INDEX_FILE",
+            "GIT_COMMON_DIR",
+            "GIT_PREFIX",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        ] {
+            command.env_remove(key);
+        }
+
+        command
+    }
+
+    fn git(dir: &Path, args: &[&str]) -> String {
+        let output = git_command(dir)
+            .args(args)
+            .output()
+            .expect("git should be installed");
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    /// Gives the store an identity, which git demands before it will commit.
+    fn set_identity(dir: &Path) {
+        git(dir, &["config", "user.email", "test@example.com"]);
+        git(dir, &["config", "user.name", "Test"]);
+    }
+
+    /// A remote for stores to sync through, standing in for the forge.
+    ///
+    /// Always a local bare repository: a test that reached a real host would
+    /// hang on the network rather than fail.
+    fn remote_repo(dir: &Path) -> String {
+        fs::create_dir_all(dir).unwrap();
+        git_command(dir)
+            .args(["init", "--bare", "--initial-branch=main", "."])
+            .output()
+            .unwrap();
+        dir.to_string_lossy().to_string()
+    }
+
+    /// Prepares a store that syncs through `remote`, as `insights setup` would.
+    fn store_synced_to(dir: &Path, remote: &str) -> Result<()> {
+        fs::create_dir_all(dir)?;
+        use_store(dir);
+        sync::init(remote)?;
+        git(dir, &["checkout", "-B", "main"]);
+        set_identity(dir);
+        Ok(())
+    }
+
+    fn write_insight(topic: &str, name: &str, details: &str) -> Result<()> {
+        insight::save(&Insight::new(
+            topic.to_string(),
+            name.to_string(),
+            "An overview".to_string(),
+            details.to_string(),
+        ))
+    }
+
+    #[test]
+    #[serial]
+    fn test_sync_makes_a_store_a_repository_on_first_run() -> Result<()> {
+        let temp = TempDir::new().unwrap();
+        use_store(temp.path());
+        write_insight("rust", "async-patterns", "Details")?;
+
+        // The store has no repository yet, so no identity is configured in it;
+        // git takes one from the environment for the first commit.
+        let identity = [
+            ("GIT_AUTHOR_NAME", "Test"),
+            ("GIT_AUTHOR_EMAIL", "test@example.com"),
+            ("GIT_COMMITTER_NAME", "Test"),
+            ("GIT_COMMITTER_EMAIL", "test@example.com"),
+        ];
+        for (key, value) in identity {
+            env::set_var(key, value);
+        }
+        let report = sync::sync();
+        for (key, _) in identity {
+            env::remove_var(key);
+        }
+
+        let report = report?;
+        assert!(temp.path().join(".git").exists());
+        assert_eq!(report.committed, vec!["rust/async-patterns.insight.md"]);
+        assert_eq!(report.remote, None);
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_sync_ignores_the_repository_a_git_hook_points_at() -> Result<()> {
+        let elsewhere = TempDir::new().unwrap();
+        git_command(elsewhere.path()).arg("init").output().unwrap();
+
+        let temp = TempDir::new().unwrap();
+        let remote_dir = TempDir::new().unwrap();
+        let remote = remote_repo(&remote_dir.path().join("insights.git"));
+        store_synced_to(temp.path(), &remote)?;
+        write_insight("rust", "async-patterns", "Details")?;
+
+        // What git exports to a hook. It overrides `git -C`, so a sync run from
+        // one would otherwise commit and push that repository instead.
+        env::set_var("GIT_DIR", elsewhere.path().join(".git"));
+        env::set_var("GIT_WORK_TREE", elsewhere.path());
+        let report = sync::sync();
+        env::remove_var("GIT_DIR");
+        env::remove_var("GIT_WORK_TREE");
+
+        assert_eq!(report?.committed, vec!["rust/async-patterns.insight.md"]);
+        assert_eq!(git(elsewhere.path(), &["status", "--porcelain"]), "");
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_a_store_inside_another_repository_is_refused() -> Result<()> {
+        let project = TempDir::new().unwrap();
+        git_command(project.path()).arg("init").output().unwrap();
+        set_identity(project.path());
+
+        // A store nested in a checkout, which `git -C` would resolve to that
+        // checkout: syncing it would take the project's remote and commit its
+        // working tree as though it were insights.
+        let store = project.path().join("insights");
+        fs::create_dir_all(&store)?;
+        use_store(&store);
+
+        let remote_dir = TempDir::new().unwrap();
+        let remote = remote_repo(&remote_dir.path().join("insights.git"));
+        let error = sync::init(&remote).unwrap_err().to_string();
+
+        assert!(error.contains("sits inside the git repository"));
+        // The enclosing project keeps its own remote.
+        assert_eq!(git(project.path(), &["remote", "get-url", "origin"]), "");
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_init_makes_a_repository_pointed_at_the_remote() -> Result<()> {
+        let temp = TempDir::new().unwrap();
+        let remote_dir = TempDir::new().unwrap();
+        let remote = remote_repo(&remote_dir.path().join("insights.git"));
+        use_store(temp.path());
+
+        sync::init(&remote)?;
+
+        assert!(temp.path().join(".git").exists());
+        assert_eq!(git(temp.path(), &["remote", "get-url", "origin"]), remote);
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_forget_remote_drops_the_remote_and_keeps_the_history() -> Result<()> {
+        let temp = TempDir::new()?;
+        let remote = remote_repo(&temp.path().join("remote"));
+        let store = temp.path().join("store");
+        store_synced_to(&store, &remote)?;
+        write_insight("rust", "async", "Use tokio")?;
+        sync::sync()?;
+
+        sync::forget_remote()?;
+        sync::forget_remote()?;
+
+        assert_eq!(sync::sync()?.remote, None);
+        assert!(git(&store, &["log", "--oneline"]).contains("Sync 1 insight"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_a_conflict_report_names_the_insights_and_the_store() {
+        let report = sync::SyncReport {
+            conflicted: vec!["rust/async.insight.md".to_string()],
+            store: PathBuf::from("/store"),
+            ..Default::default()
+        };
+
+        let text = report.render();
+
+        assert!(text.contains("rust/async"));
+        assert!(text.contains("git -C /store pull --rebase"));
+        assert!(!text.contains("In sync"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_init_twice_keeps_the_history_and_takes_the_new_remote() -> Result<()> {
+        let temp = TempDir::new().unwrap();
+        let remotes = TempDir::new().unwrap();
+        let first = remote_repo(&remotes.path().join("first.git"));
+        let second = remote_repo(&remotes.path().join("second.git"));
+        store_synced_to(temp.path(), &first)?;
+        write_insight("rust", "kept", "Details")?;
+        sync::sync()?;
+        let commit = git(temp.path(), &["rev-parse", "HEAD"]);
+
+        sync::init(&second)?;
+
+        assert_eq!(git(temp.path(), &["rev-parse", "HEAD"]), commit);
+        assert_eq!(git(temp.path(), &["remote", "get-url", "origin"]), second);
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_sync_commits_insights_written_on_this_machine() -> Result<()> {
+        let temp = TempDir::new().unwrap();
+        let remote_dir = TempDir::new().unwrap();
+        let remote = remote_repo(&remote_dir.path().join("insights.git"));
+        store_synced_to(temp.path(), &remote)?;
+        write_insight("rust", "async-patterns", "Details")?;
+
+        let report = sync::sync()?;
+
+        assert_eq!(report.committed, vec!["rust/async-patterns.insight.md"]);
+        assert_eq!(git(temp.path(), &["status", "--porcelain"]), "");
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_an_edited_insight_is_reported_under_its_real_path() -> Result<()> {
+        let temp = TempDir::new().unwrap();
+        let remote_dir = TempDir::new().unwrap();
+        let remote = remote_repo(&remote_dir.path().join("insights.git"));
+        store_synced_to(temp.path(), &remote)?;
+        write_insight("adept", "toolchain", "The original")?;
+        sync::sync()?;
+
+        // Editing rather than adding is what makes git report the file with a
+        // blank first status column, the case that used to lose a character.
+        let mut edited = insight::load("adept", "toolchain")?;
+        insight::update(&mut edited, None, Some("Edited"))?;
+        let report = sync::sync()?;
+
+        assert_eq!(report.committed, vec!["adept/toolchain.insight.md"]);
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_sync_keeps_machine_local_files_out_of_the_history() -> Result<()> {
+        let temp = TempDir::new().unwrap();
+        let remote_dir = TempDir::new().unwrap();
+        let remote = remote_repo(&remote_dir.path().join("insights.git"));
+        store_synced_to(temp.path(), &remote)?;
+        write_insight("rust", "async-patterns", "Details")?;
+        fs::write(temp.path().join("server-logs.jsonl"), "{}\n")?;
+        fs::write(temp.path().join("usage.json"), "{}")?;
+
+        sync::sync()?;
+
+        let tracked = git(temp.path(), &["ls-files"]);
+        assert!(tracked.contains("rust/async-patterns.insight.md"));
+        assert!(!tracked.contains("server-logs.jsonl"));
+        assert!(!tracked.contains("usage.json"));
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_an_insight_written_on_one_machine_reaches_the_other() -> Result<()> {
+        let remote_dir = TempDir::new().unwrap();
+        let remote = remote_repo(&remote_dir.path().join("insights.git"));
+        let laptop = TempDir::new().unwrap();
+        let desktop = TempDir::new().unwrap();
+
+        store_synced_to(laptop.path(), &remote)?;
+        write_insight("rust", "async-patterns", "Written on the laptop")?;
+        let sent = sync::sync()?;
+        assert!(sent.pushed);
+
+        store_synced_to(desktop.path(), &remote)?;
+        let received = sync::sync()?;
+
+        assert_eq!(received.pulled, vec!["rust/async-patterns.insight.md"]);
+        let loaded = insight::load("rust", "async-patterns")?;
+        assert_eq!(loaded.details, "Written on the laptop");
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_the_same_insight_edited_on_two_machines_is_reported_not_merged() -> Result<()> {
+        let remote_dir = TempDir::new().unwrap();
+        let remote = remote_repo(&remote_dir.path().join("insights.git"));
+        let laptop = TempDir::new().unwrap();
+        let desktop = TempDir::new().unwrap();
+
+        // Both machines start from the same insight.
+        store_synced_to(laptop.path(), &remote)?;
+        write_insight("rust", "async-patterns", "The original")?;
+        sync::sync()?;
+        store_synced_to(desktop.path(), &remote)?;
+        sync::sync()?;
+
+        // Then each edits it without seeing the other's edit.
+        use_store(desktop.path());
+        let mut on_desktop = insight::load("rust", "async-patterns")?;
+        insight::update(&mut on_desktop, None, Some("Changed on the desktop"))?;
+        sync::sync()?;
+
+        use_store(laptop.path());
+        let mut on_laptop = insight::load("rust", "async-patterns")?;
+        insight::update(&mut on_laptop, None, Some("Changed on the laptop"))?;
+        let report = sync::sync()?;
+
+        assert_eq!(report.conflicted, vec!["rust/async-patterns.insight.md"]);
+        assert!(!report.pushed);
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_a_conflict_never_leaves_conflict_markers_in_the_store() -> Result<()> {
+        let remote_dir = TempDir::new().unwrap();
+        let remote = remote_repo(&remote_dir.path().join("insights.git"));
+        let laptop = TempDir::new().unwrap();
+        let desktop = TempDir::new().unwrap();
+
+        store_synced_to(laptop.path(), &remote)?;
+        write_insight("rust", "async-patterns", "The original")?;
+        sync::sync()?;
+        store_synced_to(desktop.path(), &remote)?;
+        sync::sync()?;
+
+        use_store(desktop.path());
+        let mut on_desktop = insight::load("rust", "async-patterns")?;
+        insight::update(&mut on_desktop, None, Some("Changed on the desktop"))?;
+        sync::sync()?;
+
+        use_store(laptop.path());
+        let mut on_laptop = insight::load("rust", "async-patterns")?;
+        insight::update(&mut on_laptop, None, Some("Changed on the laptop"))?;
+        sync::sync()?;
+
+        // The server reads this directory continuously, so the file has to stay
+        // a readable insight even while the conflict is outstanding.
+        let path = laptop.path().join("rust").join("async-patterns.insight.md");
+        let contents = fs::read_to_string(&path)?;
+        assert!(!contents.contains("<<<<<<<"));
+        assert!(!contents.contains(">>>>>>>"));
+        assert_eq!(
+            insight::load("rust", "async-patterns")?.details,
+            "Changed on the laptop"
+        );
+
+        Ok(())
+    }
+}

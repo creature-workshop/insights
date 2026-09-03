@@ -6,6 +6,7 @@ use crate::cli::display::display_search_result;
 use crate::cli::server_manager::ensure_server_running;
 use crate::server::services::search::SearchCommandOptions;
 use crate::server::types::SearchRequest;
+use crate::sync;
 // CLI is now a pure thin client - no business logic imports needed
 
 /// Add a new insight to the knowledge base (production version)
@@ -457,4 +458,29 @@ fn display_search_results(
             );
         }
     }
+}
+
+/// Share this machine's insights with the other machines using the store.
+///
+/// Passing a remote sets the store up first, so a machine that has never synced
+/// and one that syncs daily both run the same command.
+pub async fn sync_insights(remote: Option<&str>, forget_remote: bool) -> Result<()> {
+    if forget_remote {
+        sync::forget_remote()?;
+        println!(
+            "{} Store no longer syncs. Its history is kept.",
+            "✓".green()
+        );
+        return Ok(());
+    }
+
+    if let Some(remote) = remote {
+        sync::init(remote)?;
+        println!("{} Store syncs with {}", "✓".green(), remote.cyan());
+    }
+
+    let report = sync::sync()?;
+    println!("{}", report.render());
+
+    Ok(())
 }

@@ -117,7 +117,30 @@ pub fn from_answer(
     Ok(Some(path))
 }
 
-pub fn print_summary(rule_path: &Option<PathBuf>, shim_path: &Option<PathBuf>) {
+/// Points the insight store at the git remote the operator named.
+///
+/// Prints the remote that was set, or nothing when they left the answer blank.
+pub fn sync_remote(answers: &serde_json::Value) -> Result<Option<String>> {
+    let remote = answers
+        .get("SYNC_REMOTE")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim();
+
+    if remote.is_empty() {
+        return Ok(None);
+    }
+
+    crate::sync::init(remote)?;
+
+    Ok(Some(remote.to_string()))
+}
+
+pub fn print_summary(
+    rule_path: &Option<PathBuf>,
+    shim_path: &Option<PathBuf>,
+    sync_remote: &Option<String>,
+) {
     println!();
     println!("{}", "Setup complete!".green().bold());
     println!();
@@ -127,12 +150,18 @@ pub fn print_summary(rule_path: &Option<PathBuf>, shim_path: &Option<PathBuf>) {
     if let Some(rule) = rule_path {
         println!("  {} Rule: {}", "✓".green(), rule.display());
     }
-    if rule_path.is_none() && shim_path.is_none() {
+    if let Some(remote) = sync_remote {
+        println!("  {} Sync remote: {}", "✓".green(), remote);
+    }
+    if rule_path.is_none() && shim_path.is_none() && sync_remote.is_none() {
         println!("  No changes made.");
     }
     println!();
     println!("{}", "Hints:".cyan().bold());
     println!("  • Re-run `insights setup` to regenerate with latest defaults.");
+    if sync_remote.is_some() {
+        println!("  • Run `insights sync` to share new insights with your other machines.");
+    }
 }
 
 fn xdg_config_dir() -> PathBuf {

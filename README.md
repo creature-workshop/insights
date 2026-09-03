@@ -27,6 +27,7 @@ insights list [topic] [--pinned]
 insights update <topic> <name> [-o <overview>] [-d <details>]
 insights pin <topic> <name>
 insights topics
+insights sync [--remote <url> | --forget-remote]
 insights setup
 ```
 
@@ -36,8 +37,29 @@ override with `--bind` or `INSIGHTS_SERVER_URL`. The REST surface is defined
 in `src/server/routing.rs`.
 
 `insights setup` runs an interactive wizard that writes the shell init file,
-optionally hooks it into your shell rc, and installs the use-insights rule for
-supported agents (Cursor, Claude Code, Windsurf, Zed).
+optionally hooks it into your shell rc, installs the use-insights rule for
+supported agents (Cursor, Claude Code), and can point the store
+at a git remote to sync through.
+
+## Sharing a store between machines
+
+`insights sync` makes the store a git repository and keeps your machines in
+step: it commits what this machine wrote, replays it on top of what the others
+wrote, and pushes. Point it at a remote you own the first time, then run it bare
+after that:
+
+```bash
+insights sync --remote git@example.com:you/insights.git
+insights sync
+```
+
+Local work is committed before anything is pulled, so an interrupted sync cannot
+lose an insight. When the same insight was edited on two machines the sync stops
+and names it, leaving the store exactly as it was — the server reads the store
+continuously, so a half-applied rebase full of conflict markers is never left
+behind. Resolve it with git and sync again; the reasoning is recorded in
+[docs/decisions/000001](docs/decisions/000001-sync-stops-on-conflict.md).
+`insights sync --forget-remote` stops the store syncing and keeps its history.
 
 ## Storage
 

@@ -63,7 +63,7 @@ pub fn build_steps(
             "Install shell shim?",
             "INSTALL_SHIM",
             Branch::Next,
-            Branch::Finish,
+            Branch::Goto("sync-confirm"),
         )
         .id("shim-confirm"),
         WizardStep::select(
@@ -81,6 +81,17 @@ pub fn build_steps(
         }),
         WizardStep::prompt("Enter shell RC path:", "SHIM_PATH", "")
             .id("custom-rc-path")
+            .on_submit(|_| Branch::Goto("sync-confirm")),
+        // -- Multi-device sync --
+        WizardStep::confirm(
+            "Sync your insights to your other machines through a git remote?",
+            "INSTALL_SYNC",
+            Branch::Next,
+            Branch::Finish,
+        )
+        .id("sync-confirm"),
+        WizardStep::prompt("Git remote URL for your insight store:", "SYNC_REMOTE", "")
+            .id("sync-remote")
             .on_submit(|_| Branch::Finish),
     ]
 }
