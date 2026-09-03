@@ -109,6 +109,15 @@ enum Command {
         #[arg(long, default_value = "all")]
         level: String,
     },
+    /// Share insights with your other machines through a git remote
+    Sync {
+        /// Git remote to sync with, setting the store up if it has none
+        #[arg(long)]
+        remote: Option<String>,
+        /// Stop syncing: drop the remote and keep the store's history
+        #[arg(long, conflicts_with = "remote")]
+        forget_remote: bool,
+    },
     /// Interactive setup wizard for insights
     #[command(name = "setup")]
     Setup,
@@ -143,6 +152,10 @@ async fn handle(command: Command) -> Result<()> {
         Command::Topics => commands::list_topics().await,
         Command::Index { force } => commands::index_insights(force).await,
         Command::Logs { limit, level } => commands::logs(limit, &level).await,
+        Command::Sync {
+            remote,
+            forget_remote,
+        } => commands::sync_insights(remote.as_deref(), forget_remote).await,
         Command::Setup => setup::setup(),
     }
 }
