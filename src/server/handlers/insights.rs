@@ -1077,20 +1077,11 @@ fn apply_exclusion_filter(
                 result.topic, result.name, result.overview, result.details
             )
         };
-        let content = if options.case_sensitive {
-            content
-        } else {
-            content.to_lowercase()
-        };
-
-        !options.exclude.iter().any(|term| {
-            let normalized = if options.case_sensitive {
-                term.to_string()
-            } else {
-                term.to_lowercase()
-            };
-            content.contains(&normalized)
-        })
+        !crate::server::services::search::contains_excluded_term(
+            &content,
+            &options.exclude,
+            options.case_sensitive,
+        )
     });
 }
 
