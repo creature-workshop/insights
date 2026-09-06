@@ -27,16 +27,10 @@ pub async fn start_server(addr: SocketAddr) -> Result<()> {
     let logs_path = get_server_logs_path();
     let daemon_logs = Arc::new(DaemonLogs::new(&logs_path)?);
 
-    // Initialize global logger with Info level (less verbose than before)
     init_global_logger(daemon_logs.clone())
         .map_err(|_| anyhow::anyhow!("Failed to initialize global logger"))?;
 
-    // Set log level to Info by default (can be overridden via env var)
-    let log_level = std::env::var("INSIGHTS_LOG_LEVEL")
-        .map(|s| middleware::LogLevel::parse(&s))
-        .unwrap_or(middleware::LogLevel::Info);
-
-    middleware::set_log_level(log_level);
+    middleware::set_log_level(configured_log_level());
 
     // Insight files written before the usage store carry counters that belong
     // to this machine; move them before anything serves a read.
@@ -120,6 +114,13 @@ pub async fn start_server(addr: SocketAddr) -> Result<()> {
     }
 }
 
+/// The log level configured for this process: INSIGHTS_LOG_LEVEL when set, Info otherwise
+fn configured_log_level() -> middleware::LogLevel {
+    std::env::var("INSIGHTS_LOG_LEVEL")
+        .map(|s| middleware::LogLevel::parse(&s))
+        .unwrap_or(middleware::LogLevel::Info)
+}
+
 /// Get the path for server logs
 #[cfg(not(tarpaulin_include))] // Skip coverage - filesystem path operations
 fn get_server_logs_path() -> std::path::PathBuf {
@@ -140,4 +141,31 @@ fn get_lancedb_data_path() -> std::path::PathBuf {
         .join("volatile")
         .join("insights")
         .join("lancedb")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+
+    #[test]
+    #[serial]
+    fn test_configured_log_level_reads_the_environment() {
+        std::env::set_var("INSIGHTS_LOG_LEVEL", "debug");
+        assert_eq!(configured_log_level(), middleware::LogLevel::Debug);
+
+        std::env::remove_var("INSIGHTS_LOG_LEVEL");
+        assert_eq!(configured_log_level(), middleware::LogLevel::Info);
+    }
+
+    #[test]
+    #[serial]
+    fn test_debug_configuration_reaches_should_log() {
+        std::env::set_var("INSIGHTS_LOG_LEVEL", "debug");
+        middleware::set_log_level(configured_log_level());
+        assert!(middleware::should_log(middleware::LogLevel::Debug));
+
+        std::env::remove_var("INSIGHTS_LOG_LEVEL");
+        middleware::set_log_level(middleware::LogLevel::Info);
+    }
 }
