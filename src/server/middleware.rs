@@ -11,6 +11,7 @@ use axum::{
 };
 use bentley::daemon_logs::LogContext;
 use bentley::DaemonLogs;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -207,35 +208,50 @@ impl LogLevel {
             LogLevel::Debug => "debug",
         }
     }
+
+    /// The level behind a stored discriminant; unknown values fall back to Info.
+    fn from_u8(value: u8) -> Self {
+        match value {
+            0 => LogLevel::Error,
+            1 => LogLevel::Warn,
+            2 => LogLevel::Info,
+            3 => LogLevel::Success,
+            4 => LogLevel::Verbose,
+            5 => LogLevel::Debug,
+            _ => LogLevel::Info,
+        }
+    }
 }
 
 /// Global logger instance
 static GLOBAL_LOGGER: once_cell::sync::OnceCell<Arc<DaemonLogs>> = once_cell::sync::OnceCell::new();
 
-/// Global log level (defaults to Info to reduce verbosity)
-static GLOBAL_LOG_LEVEL: once_cell::sync::OnceCell<LogLevel> = once_cell::sync::OnceCell::new();
+/// Global log level as a LogLevel discriminant (defaults to Info)
+static GLOBAL_LOG_LEVEL: AtomicU8 = AtomicU8::new(LogLevel::Info as u8);
 
 /// Global vector database service instance (only with ml-features)
 #[cfg(feature = "ml-features")]
 static GLOBAL_VECTOR_DB: once_cell::sync::OnceCell<Arc<BoxedVectorDatabase>> =
     once_cell::sync::OnceCell::new();
 
-/// Initialize the global logger and log level
+/// Initialize the global logger
 pub fn init_global_logger(logger: Arc<DaemonLogs>) -> Result<(), Arc<DaemonLogs>> {
-    // Set default log level to Info (less verbose than before)
-    let _ = GLOBAL_LOG_LEVEL.set(LogLevel::Info);
     GLOBAL_LOGGER.set(logger)
 }
 
 /// Set the global log level
 pub fn set_log_level(level: LogLevel) {
-    let _ = GLOBAL_LOG_LEVEL.set(level);
+    GLOBAL_LOG_LEVEL.store(level as u8, Ordering::Relaxed);
+}
+
+/// The global log level currently in effect
+pub fn current_log_level() -> LogLevel {
+    LogLevel::from_u8(GLOBAL_LOG_LEVEL.load(Ordering::Relaxed))
 }
 
 /// Check if a log level should be output based on current global level
 pub fn should_log(level: LogLevel) -> bool {
-    let current_level = GLOBAL_LOG_LEVEL.get().copied().unwrap_or(LogLevel::Info);
-    level <= current_level
+    level <= current_log_level()
 }
 
 /// Centralized logging function that goes to both console and file
@@ -341,4 +357,51 @@ pub async fn server_warn(message: &str, component: &str) {
 
 pub async fn server_error(message: &str, component: &str) {
     log_to_both(LogLevel::Error, message, component).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+
+    const ALL_LEVELS: [LogLevel; 6] = [
+        LogLevel::Error,
+        LogLevel::Warn,
+        LogLevel::Info,
+        LogLevel::Success,
+        LogLevel::Verbose,
+        LogLevel::Debug,
+    ];
+
+    #[test]
+    #[serial]
+    fn test_set_log_level_takes_effect_at_every_level() {
+        for level in ALL_LEVELS {
+            set_log_level(level);
+            assert_eq!(current_log_level(), level);
+        }
+        set_log_level(LogLevel::Info);
+    }
+
+    #[test]
+    #[serial]
+    fn test_should_log_passes_levels_at_or_below_the_current_one() {
+        set_log_level(LogLevel::Warn);
+        assert!(should_log(LogLevel::Error));
+        assert!(should_log(LogLevel::Warn));
+        assert!(!should_log(LogLevel::Info));
+        assert!(!should_log(LogLevel::Verbose));
+        assert!(!should_log(LogLevel::Debug));
+
+        set_log_level(LogLevel::Debug);
+        for level in ALL_LEVELS {
+            assert!(should_log(level));
+        }
+        set_log_level(LogLevel::Info);
+    }
+
+    #[test]
+    fn test_from_u8_falls_back_to_info_on_unknown_values() {
+        assert_eq!(LogLevel::from_u8(42), LogLevel::Info);
+    }
 }
