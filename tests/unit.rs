@@ -96,6 +96,63 @@ mod insight_tests {
 
     #[test]
     #[serial]
+    fn test_save_rejects_slash_in_name() -> Result<()> {
+        let temp = setup_temp_insights_root("slash_name");
+
+        let insight = Insight::new(
+            "topic".to_string(),
+            "stage 2: label/driven dispatch".to_string(),
+            "Overview".to_string(),
+            "Details".to_string(),
+        );
+
+        let result = insight::save(&insight);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("path separator"));
+
+        // Nothing may land on disk: a nested directory would be invisible to
+        // list/search/load, which is the silent failure this guards against.
+        assert!(!temp.path().join("topic").exists());
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_save_rejects_slash_in_topic() {
+        let _temp = setup_temp_insights_root("slash_topic");
+
+        let insight = Insight::new(
+            "shellops/tia-test-dispatch".to_string(),
+            "name".to_string(),
+            "Overview".to_string(),
+            "Details".to_string(),
+        );
+
+        let result = insight::save(&insight);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("path separator"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_save_rejects_backslash_in_name() {
+        let _temp = setup_temp_insights_root("backslash_name");
+
+        let insight = Insight::new(
+            "topic".to_string(),
+            "windows\\style".to_string(),
+            "Overview".to_string(),
+            "Details".to_string(),
+        );
+
+        let result = insight::save(&insight);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("path separator"));
+    }
+
+    #[test]
+    #[serial]
     fn test_load_nonexistent_insight() {
         let _temp = setup_temp_insights_root("load_none");
 

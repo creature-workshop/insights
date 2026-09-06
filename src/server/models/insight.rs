@@ -158,6 +158,8 @@ pub fn file_path(insight: &Insight) -> Result<PathBuf> {
 }
 
 pub fn save(insight: &Insight) -> Result<()> {
+    check_no_path_separator("topic", &insight.topic)?;
+    check_no_path_separator("name", &insight.name)?;
     let file_path = file_path(insight)?;
     ensure_parent_dir_exists(&file_path)?;
     check_insight_is_new(&file_path, &insight.topic, &insight.name)?;
@@ -700,6 +702,21 @@ fn make_insight_path(topic: &str, name: &str) -> Result<std::path::PathBuf> {
 fn ensure_parent_dir_exists(path: &std::path::Path) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
+    }
+    Ok(())
+}
+
+/// Rejects a topic or name containing a path separator. `file_path` joins
+/// both into the on-disk path, so a separator would nest the file below the
+/// topic directory, where `collect_insights_from_topic` never looks — the
+/// insight would save successfully and then be unreachable by list, search,
+/// or load.
+fn check_no_path_separator(field: &str, value: &str) -> Result<()> {
+    if value.contains('/') || value.contains('\\') {
+        return Err(anyhow!(
+            "Insight {field} {value:?} contains a path separator ('/' or '\\'); \
+             insight topics and names must be flat"
+        ));
     }
     Ok(())
 }
