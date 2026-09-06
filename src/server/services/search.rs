@@ -243,6 +243,24 @@ pub fn matches_date_range(insight: &insight::Insight, options: &SearchOptions) -
     true
 }
 
+/// Case-folds `text` for matching: unchanged when case-sensitive, lowercased otherwise.
+pub fn search_normalization(text: &str, case_sensitive: bool) -> String {
+    if case_sensitive {
+        text.to_string()
+    } else {
+        text.to_lowercase()
+    }
+}
+
+/// Returns true when `content` contains any of `terms`, compared under the given
+/// case sensitivity.
+pub fn contains_excluded_term(content: &str, terms: &[String], case_sensitive: bool) -> bool {
+    let content = search_normalization(content, case_sensitive);
+    terms
+        .iter()
+        .any(|term| content.contains(&search_normalization(term, case_sensitive)))
+}
+
 /// Returns true if the insight matches any exclusion term (and should be filtered out).
 pub fn matches_exclusion(insight: &insight::Insight, options: &SearchOptions) -> bool {
     if options.exclude.is_empty() {
@@ -250,20 +268,7 @@ pub fn matches_exclusion(insight: &insight::Insight, options: &SearchOptions) ->
     }
 
     let content = get_normalized_content(insight, options);
-    let content = if options.case_sensitive {
-        content
-    } else {
-        content.to_lowercase()
-    };
-
-    options.exclude.iter().any(|term| {
-        let normalized = if options.case_sensitive {
-            term.to_string()
-        } else {
-            term.to_lowercase()
-        };
-        content.contains(&normalized)
-    })
+    contains_excluded_term(&content, &options.exclude, options.case_sensitive)
 }
 
 fn sort_by_relevance(results: &mut [SearchResult]) {
@@ -425,14 +430,10 @@ fn get_normalized_content(insight: &insight::Insight, options: &SearchOptions) -
 }
 
 fn get_normalized_terms(terms: &[String], options: &SearchOptions) -> Vec<String> {
-    if options.case_sensitive {
-        terms.to_vec()
-    } else {
-        terms
-            .iter()
-            .map(|t| t.to_lowercase())
-            .collect::<Vec<String>>()
-    }
+    terms
+        .iter()
+        .map(|t| search_normalization(t, options.case_sensitive))
+        .collect()
 }
 
 fn get_exact_match(insight: &insight::Insight, terms: &[String], options: &SearchOptions) -> f32 {
@@ -754,6 +755,34 @@ mod tests {
 
         let normalized = get_normalized_terms(&terms, &options);
         assert_eq!(normalized, vec!["test".to_string(), "content".to_string()]);
+    }
+
+    #[test]
+    fn test_search_normalization_case_sensitive_keeps_case() {
+        assert_eq!(search_normalization("MixedCase", true), "MixedCase");
+    }
+
+    #[test]
+    fn test_search_normalization_case_insensitive_lowercases() {
+        assert_eq!(search_normalization("MixedCase", false), "mixedcase");
+    }
+
+    #[test]
+    fn test_contains_excluded_term_case_insensitive() {
+        let terms = vec!["SECRET".to_string()];
+        assert!(contains_excluded_term("a secret plan", &terms, false));
+    }
+
+    #[test]
+    fn test_contains_excluded_term_case_sensitive() {
+        let terms = vec!["SECRET".to_string()];
+        assert!(!contains_excluded_term("a secret plan", &terms, true));
+        assert!(contains_excluded_term("a SECRET plan", &terms, true));
+    }
+
+    #[test]
+    fn test_contains_excluded_term_no_terms() {
+        assert!(!contains_excluded_term("anything", &[], false));
     }
 
     #[test]
