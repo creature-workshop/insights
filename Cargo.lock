@@ -873,27 +873,92 @@ dependencies = [
 
 [[package]]
 name = "blizz"
-version = "2.1.8"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "baed95959d2b28247c366b5e606ce0b478a7a9039ec118cec5d04c9f91e9fbd2"
+checksum = "1dfb792ff69e674f1f63728fb190b866eba6dc4473d30a76ecb2c8e5f62099eb"
 dependencies = [
  "blizz-derive",
- "crossterm",
- "rand 0.10.1",
- "serde_json",
- "unicode-width",
+ "blizz-fsm",
+ "blizz-persona",
+ "blizz-renderer",
+ "blizz-runtime",
+ "blizz-ui",
 ]
 
 [[package]]
 name = "blizz-derive"
-version = "2.1.8"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d06c536171b96ba3815906eb8a4c6b5c3d758d67e4329a28652d57b8105bba11"
+checksum = "f8e63c4ab63082f69a745878190dc65cd0a43eb89f6b9d793e316269aef67208"
 dependencies = [
  "heck",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "blizz-fsm"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "022915f629fd6f39d6506eccf9c946e6fc3de109288f3d2769218ec12dedf412"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "blizz-persona"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a1d972ce7c1c40fc64ba48e154fe275aa422658c9cae3c8ed3edde9cec65d44"
+dependencies = [
+ "blizz-fsm",
+ "blizz-renderer",
+ "blizz-runtime",
+ "blizz-ui",
+ "crossterm",
+ "dirs",
+ "rand 0.10.1",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+]
+
+[[package]]
+name = "blizz-renderer"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4669382ebcd9d1a4a79d05b7806177076763066a23800d71654531d93e188d55"
+dependencies = [
+ "crossterm",
+ "rand 0.10.1",
+]
+
+[[package]]
+name = "blizz-runtime"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c868e31ffab5236378f25c5664265e0de7b709eb7a068f8e42735cb942cf2b4"
+dependencies = [
+ "blizz-fsm",
+ "blizz-renderer",
+ "blizz-ui",
+ "crossterm",
+ "libc",
+ "rand 0.10.1",
+ "serde_json",
+]
+
+[[package]]
+name = "blizz-ui"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2855e6d32352502745eeb031ef2bc0db3009b488cfd73a9f9c6a11cbbe0f05f"
+dependencies = [
+ "blizz-renderer",
+ "crossterm",
+ "rand 0.10.1",
+ "unicode-width",
 ]
 
 [[package]]

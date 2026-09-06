@@ -52,7 +52,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
 bentley = { version = "0.14", features = ["daemon-logs", "schemars"] }
-blizz = { version = "2.1.8" }
+blizz = "3.0.0"
 
 tokio = { version = "1.47", features = ["full"] }
 uuid = { version = "1.18", features = ["v4", "serde"] }

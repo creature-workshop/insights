@@ -1,10 +1,10 @@
-use blizz::{Branch, WizardStep};
+use blizz::{Branch, Step};
 
 pub fn build_steps(
     rc_files: &[(String, String)],
     rule_destinations: &[(String, String)],
     has_detected_aides: bool,
-) -> Vec<WizardStep> {
+) -> Vec<Step> {
     let mut rc_options: Vec<(&str, &str)> = rc_files
         .iter()
         .map(|(label, value)| (label.as_str(), value.as_str()))
@@ -18,13 +18,13 @@ pub fn build_steps(
     rule_options.push(("Other", "other"));
 
     vec![
-        WizardStep::dialog("Welcome! Let's set up insights for your environment."),
+        Step::dialog("Welcome! Let's set up insights for your environment."),
         // -- Rule file --
-        WizardStep::confirm(
+        Step::confirm(
             "Install an AI rule file for this tool?",
             "INSTALL_RULE",
             Branch::Next,
-            Branch::Goto("shim-confirm"),
+            Branch::JumpTo("shim-confirm"),
         )
         .id("rule-confirm")
         .on_submit(move |answers| {
@@ -34,15 +34,15 @@ pub fn build_steps(
                 .unwrap_or("yes");
             if val == "yes" {
                 if has_detected_aides {
-                    Branch::Goto("rule-select")
+                    Branch::JumpTo("rule-select")
                 } else {
-                    Branch::Goto("custom-rule-path")
+                    Branch::JumpTo("custom-rule-path")
                 }
             } else {
-                Branch::Goto("shim-confirm")
+                Branch::JumpTo("shim-confirm")
             }
         }),
-        WizardStep::select(
+        Step::select(
             "Where should the rule be installed?",
             "RULE_PATH",
             rule_options,
@@ -50,23 +50,23 @@ pub fn build_steps(
         .id("rule-select")
         .on_submit(|answers| {
             if answers.get("RULE_PATH").and_then(|v| v.as_str()) == Some("other") {
-                Branch::Goto("custom-rule-path")
+                Branch::JumpTo("custom-rule-path")
             } else {
-                Branch::Goto("shim-confirm")
+                Branch::JumpTo("shim-confirm")
             }
         }),
-        WizardStep::prompt("Enter rule file path:", "RULE_PATH", "")
+        Step::prompt("Enter rule file path:", "RULE_PATH", "")
             .id("custom-rule-path")
-            .on_submit(|_| Branch::Goto("shim-confirm")),
+            .on_submit(|_| Branch::JumpTo("shim-confirm")),
         // -- Shell shim --
-        WizardStep::confirm(
+        Step::confirm(
             "Install shell shim?",
             "INSTALL_SHIM",
             Branch::Next,
-            Branch::Goto("sync-confirm"),
+            Branch::JumpTo("sync-confirm"),
         )
         .id("shim-confirm"),
-        WizardStep::select(
+        Step::select(
             "Which shell RC should the shim be added to?",
             "SHIM_PATH",
             rc_options,
@@ -74,23 +74,23 @@ pub fn build_steps(
         .id("rc-select")
         .on_submit(|answers| {
             if answers.get("SHIM_PATH").and_then(|v| v.as_str()) == Some("other") {
-                Branch::Goto("custom-rc-path")
+                Branch::JumpTo("custom-rc-path")
             } else {
                 Branch::Finish
             }
         }),
-        WizardStep::prompt("Enter shell RC path:", "SHIM_PATH", "")
+        Step::prompt("Enter shell RC path:", "SHIM_PATH", "")
             .id("custom-rc-path")
-            .on_submit(|_| Branch::Goto("sync-confirm")),
+            .on_submit(|_| Branch::JumpTo("sync-confirm")),
         // -- Multi-device sync --
-        WizardStep::confirm(
+        Step::confirm(
             "Sync your insights to your other machines through a git remote?",
             "INSTALL_SYNC",
             Branch::Next,
             Branch::Finish,
         )
         .id("sync-confirm"),
-        WizardStep::prompt("Git remote URL for your insight store:", "SYNC_REMOTE", "")
+        Step::prompt("Git remote URL for your insight store:", "SYNC_REMOTE", "")
             .id("sync-remote")
             .on_submit(|_| Branch::Finish),
     ]
