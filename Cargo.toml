@@ -4,10 +4,10 @@ version = "0.17.3"
 edition = "2021"
 authors = ["Voxel <travelsizedlions@gmail.com>"]
 license = "MIT"
-repository = "https://creature-workshop.kernelle-soft.com/kernelle-soft/insights"
-description = "Knowledge management and insight storage system"
+repository = "https://gitlab.creature-workshop.com/kernelle-soft/insights"
+description = "Agentic knowledge management for teams using Claude Code and Cursor: agents search a shared store before they work and write back what they learn"
 readme = "README.md"
-keywords = ["knowledge-management", "cli", "search", "embeddings"]
+keywords = ["knowledge-management", "claude-code", "cursor", "ai-agents", "cli"]
 categories = ["command-line-utilities", "development-tools"]
 exclude = [
   "shell/",
