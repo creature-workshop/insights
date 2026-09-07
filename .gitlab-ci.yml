@@ -1,7 +1,7 @@
 include:
-  - component: $CI_SERVER_FQDN/kernelle-soft/creatures/forge@0.15.0
-  - component: $CI_SERVER_FQDN/kernelle-soft/creatures/linear@0.15.0
-  - component: $CI_SERVER_FQDN/kernelle-soft/creatures/rust@0.15.0
+  - component: $CI_SERVER_FQDN/ksoft/creatures/forge@0.15.0
+  - component: $CI_SERVER_FQDN/ksoft/creatures/linear@0.15.0
+  - component: $CI_SERVER_FQDN/ksoft/creatures/rust@0.15.0
     inputs:
       workspace: "false"
       threshold: "20"
