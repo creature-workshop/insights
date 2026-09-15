@@ -22,5 +22,11 @@
       "embeddings": "Neural embedding generation, model loading, and ONNX inference",
       "lancedb": "Vector database storage, table management, and vector search"
     }
+  },
+  "ecosystems": {
+    "cargo": {
+      "path": "Cargo.toml",
+      "workspace": false
+    }
   }
 }
