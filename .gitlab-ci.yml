@@ -1,12 +1,13 @@
 include:
-  - component: $CI_SERVER_FQDN/ksoft/creatures/forge@0.15.0
-  - component: $CI_SERVER_FQDN/ksoft/creatures/linear@0.15.0
-  - component: $CI_SERVER_FQDN/ksoft/creatures/rust@0.15.0
+  - component: $CI_SERVER_FQDN/ksoft/creatures/forge@0.20.0-dev.3
+  - component: $CI_SERVER_FQDN/ksoft/creatures/linear@0.20.0-dev.3
+  - component: $CI_SERVER_FQDN/ksoft/creatures/agents@0.20.0-dev.3
+  - component: $CI_SERVER_FQDN/ksoft/creatures/rust@0.20.0-dev.3
     inputs:
-      workspace: "false"
       threshold: "20"
       bins: "insights insights_server"
       cargo-flags: "--no-default-features"
+  - component: $CI_SERVER_FQDN/ksoft/creatures/github@0.20.0-dev.3
 
 workflow:
   rules:
