@@ -2,7 +2,7 @@
   "name": "insights",
   "command-name": "insights",
   "description": "A drop-in, IDE-agnostic AI knowledge management and retrieval system",
-  "org": "kernelle-soft",
+  "org": "creature-workshop",
   "linear-team": "INS",
   "repo": "insights",
   "latest": "0.18.3-dev.1",
